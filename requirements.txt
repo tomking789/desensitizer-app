@@ -1,3 +1,7 @@
 pdfplumber
 python-docx
 openpyxl
+python-pptx
+PyMuPDF
+cryptography
+reportlab
