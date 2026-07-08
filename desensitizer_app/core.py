@@ -60,6 +60,8 @@ def apply_replacements_text(
 def _dedupe_replacements(replacements: Iterable[ReplacementSpec]) -> list[ReplacementSpec]:
     by_value: dict[str, ReplacementSpec] = {}
     for replacement in replacements:
+        if replacement.context_key:
+            continue
         if not replacement.value:
             continue
         existing = by_value.get(replacement.value)

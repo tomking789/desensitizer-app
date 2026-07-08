@@ -26,12 +26,14 @@ class MappingRecord:
     entity: str
     prefix: str
     value: str
+    context_key: str | None = None
+    context_label: str = ""
 
 
 class MappingStore:
     def __init__(self) -> None:
         self._records: list[MappingRecord] = []
-        self._by_key: dict[tuple[str, str], MappingRecord] = {}
+        self._by_key: dict[tuple[str, str, str | None], MappingRecord] = {}
         self._by_placeholder: dict[str, MappingRecord] = {}
         self._counters: dict[str, int] = defaultdict(int)
 
@@ -45,6 +47,8 @@ class MappingStore:
                 entity=item.get("entity", item.get("prefix", "UNKNOWN")),
                 prefix=item.get("prefix", item.get("entity", "UNKNOWN")),
                 value=item["value"],
+                context_key=item.get("context_key"),
+                context_label=item.get("context_label", ""),
             )
             store._add_record(record)
         return store
@@ -54,7 +58,7 @@ class MappingStore:
         return list(self._records)
 
     def get_or_add(self, value: str, entity: str, prefix: str) -> str:
-        key = (entity, value)
+        key = (entity, value, None)
         existing = self._by_key.get(key)
         if existing:
             return existing.placeholder
@@ -72,18 +76,26 @@ class MappingStore:
         self._add_record(record)
         return placeholder
 
-    def add_explicit(self, value: str, entity: str, prefix: str, placeholder: str) -> None:
+    def add_explicit(
+        self,
+        value: str,
+        entity: str,
+        prefix: str,
+        placeholder: str,
+        context_key: str | None = None,
+        context_label: str = "",
+    ) -> None:
         if not value:
             raise ValueError("Mapping value cannot be empty.")
         if not placeholder:
             raise ValueError("Mapping placeholder cannot be empty.")
-        existing_key = self._by_key.get((entity, value))
+        existing_key = self._by_key.get((entity, value, context_key))
         if existing_key:
             if existing_key.placeholder != placeholder:
                 raise ValueError(f"Conflicting replacement for value: {value}")
             return
         existing_placeholder = self._by_placeholder.get(placeholder)
-        if existing_placeholder and existing_placeholder.value != value:
+        if existing_placeholder and (existing_placeholder.value != value or existing_placeholder.context_key != context_key):
             raise ValueError(f"Replacement is already used: {placeholder}")
         self._add_record(
             MappingRecord(
@@ -91,6 +103,8 @@ class MappingStore:
                 entity=entity,
                 prefix=prefix,
                 value=value,
+                context_key=context_key,
+                context_label=context_label,
             )
         )
 
@@ -104,6 +118,8 @@ class MappingStore:
                     "entity": record.entity,
                     "prefix": record.prefix,
                     "value": record.value,
+                    "context_key": record.context_key,
+                    "context_label": record.context_label,
                 }
                 for record in self._records
             ],
@@ -122,6 +138,8 @@ class MappingStore:
                     "entity": record.entity,
                     "prefix": record.prefix,
                     "value": record.value,
+                    "context_key": record.context_key,
+                    "context_label": record.context_label,
                 }
                 for record in self._records
             ],
@@ -147,7 +165,7 @@ class MappingStore:
 
     def _add_record(self, record: MappingRecord) -> None:
         self._records.append(record)
-        self._by_key[(record.entity, record.value)] = record
+        self._by_key[(record.entity, record.value, record.context_key)] = record
         self._by_placeholder[record.placeholder] = record
         match = PLACEHOLDER_RE.match(record.placeholder)
         if match:

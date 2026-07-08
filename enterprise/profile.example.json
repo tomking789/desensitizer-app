@@ -1,0 +1,35 @@
+﻿{
+  "enabled": true,
+  "customer_name": "示例合作企业有限公司",
+  "customer_short_name": "示例企业",
+  "product_name": "本地资料脱敏工具",
+  "edition_name": "企业专属版",
+  "banner_text": "示例企业专用版",
+  "logo_path": "logo.png",
+  "default_terms": [
+    {
+      "value": "示例合作企业有限公司",
+      "entity": "ORGANIZATION",
+      "category": "企业名称",
+      "note": "企业全称"
+    },
+    {
+      "value": "示例企业",
+      "entity": "ORGANIZATION",
+      "category": "企业简称",
+      "note": "企业简称"
+    },
+    {
+      "value": "示例产品",
+      "entity": "CUSTOM_TERM",
+      "category": "产品名称",
+      "note": "企业产品名"
+    },
+    {
+      "value": "张三",
+      "entity": "PERSON",
+      "category": "高管姓名",
+      "note": "示例姓名，正式交付前替换"
+    }
+  ]
+}

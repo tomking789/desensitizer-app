@@ -13,6 +13,8 @@ class CandidateItem:
     prefix: str
     value: str
     replacement: str
+    context_key: str | None = None
+    context_label: str = ""
     count: int = 0
     files: set[str] = field(default_factory=set)
     source: str = "auto"
@@ -25,6 +27,8 @@ class CandidateHit:
     value: str
     count: int
     file: Path
+    context_key: str | None = None
+    context_label: str = ""
     source: str = "auto"
 
 
@@ -34,6 +38,8 @@ class ReplacementSpec:
     prefix: str
     value: str
     replacement: str
+    context_key: str | None = None
+    context_label: str = ""
 
 
 ENTITY_PREFIXES: dict[str, str] = {

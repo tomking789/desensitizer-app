@@ -52,6 +52,7 @@ start_desensitizer.cmd
 - 默认输出目录改为程序主目录下的 `输出文件`。
 - 支持中英文界面切换。
 - 支持多套颜色主题。
+- 支持可关闭的匿名使用统计，用于统计安装量和功能使用量。
 - 随发布包提供 AGPL 许可证、开源声明和对应源码归档。
 - 随发布包提供免责声明、示例文件、演示流程、行业敏感词模板和一页产品介绍 PDF。
 
@@ -100,6 +101,26 @@ start_desensitizer.cmd
 - `demo/示例文件`：演示用 Word、Excel、PDF、文本和 CSV 文件
 - `demo/演示流程.md`：完整演示步骤
 - `marketing/本地资料脱敏工具-产品介绍.pdf`：一页产品介绍 PDF
+
+## 企业内置词库
+
+通用版默认不包含某家企业的正式词库。企业专用版交付时，会在安装目录的 `enterprise` 文件夹中放入：
+
+- `profile.json`：企业名称、界面标识、少量默认词汇。
+- `terms.csv` 或 `terms.txt`：企业专属词库。
+- `logo.png`：企业 Logo，可选。
+
+软件启动后会自动读取企业标识和企业词汇，并把企业词汇写入候选敏感信息。普通员工不需要每次点击按钮导入词库；只需添加文件、扫描候选、确认后开始脱敏。
+
+界面中的“恢复内置词库”只用于误删文本框内容后重新补入内置词。“导入补充词库文件”用于管理员或临时任务追加 CSV/TXT 词库。
+
+## 匿名使用统计
+
+软件可以发送匿名使用统计，用于了解安装量和功能使用情况。统计信息只包含随机安装 ID、软件版本、系统类型、事件类型和处理数量；不会上传文件、路径、文件名、敏感词、映射表或文档内容。
+
+用户首次启动时可以选择是否保持开启，也可以随时在“设置 -> 匿名使用统计”关闭。
+
+未配置统计接收地址时，软件不会发起匿名统计网络请求。
 
 ## 手动模式
 
@@ -241,6 +262,26 @@ The release package and source directory include:
 - `demo/示例文件`: sample Word, Excel, PDF, text, and CSV files
 - `demo/演示流程.md`: complete demo steps
 - `marketing/本地资料脱敏工具-产品介绍.pdf`: one-page product introduction PDF
+
+## Built-In Enterprise Terms
+
+The general build does not include a formal term set for a specific enterprise. In an enterprise build, the `enterprise` folder next to the executable contains:
+
+- `profile.json`: enterprise name, UI identity, and a small default term set.
+- `terms.csv` or `terms.txt`: enterprise-specific terms.
+- `logo.png`: optional enterprise logo.
+
+The app reads the enterprise identity and terms on startup. Regular users do not import the built-in terms every time; they add files, scan candidates, review them, and start desensitization.
+
+"Restore Built-in Terms" is only for restoring terms that were deleted from the text box. "Import Supplemental Term File" is for administrators or temporary task-specific CSV/TXT terms.
+
+## Anonymous Usage Statistics
+
+The app can send anonymous usage statistics so the developer can understand installation count and feature usage. Statistics only include a random installation ID, app version, operating system, event type, and aggregate processing counts. Files, paths, filenames, sensitive terms, mapping files, and document content are never uploaded.
+
+Users can decide whether to keep this enabled on first launch and can turn it off anytime in Settings -> Anonymous Usage Statistics.
+
+If no telemetry endpoint is configured, the app makes no anonymous usage statistics network request.
 
 ## Manual Mode
 

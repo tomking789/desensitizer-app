@@ -11,7 +11,7 @@ For the local package in this workspace:
 - Source directory: `desensitizer-app`
 - Packaged application directory: `本地资料脱敏工具`
 - Source archive in the packaged directory: `source-code.zip`
-- Package materials: `demo`, `templates`, `marketing`, `DISCLAIMER.md`
+- Package materials: `demo`, `templates`, `marketing`, `enterprise`, `DISCLAIMER.md`
 
 ## Build Notes
 
