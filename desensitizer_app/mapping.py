@@ -15,6 +15,7 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 
+CODE_BOUNDARY = "\u2060"  # WORD JOINER — invisible; marks code boundaries
 PLACEHOLDER_RE = re.compile(r"^<([A-Z0-9_]+)_(\d{3,})>$")
 ENCRYPTED_MAPPING_FORMAT = "local-desensitizer-encrypted-mapping"
 KDF_ITERATIONS = 390_000
@@ -160,7 +161,13 @@ class MappingStore:
     def restore_text(self, text: str) -> str:
         restored = text
         for record in sorted(self._records, key=lambda item: len(item.placeholder), reverse=True):
-            restored = restored.replace(record.placeholder, record.value)
+            placeholder = record.placeholder
+            pattern = re.escape(placeholder) + re.escape(CODE_BOUNDARY)
+            if re.search(pattern, restored):
+                restored = re.sub(pattern, record.value, restored)
+            else:
+                restored = restored.replace(placeholder, record.value)
+        restored = restored.replace(CODE_BOUNDARY, "")
         return restored
 
     def _add_record(self, record: MappingRecord) -> None:

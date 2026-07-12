@@ -1,17 +1,40 @@
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
-
+*.egg-info/
+*.egg
 .venv/
 venv/
-.env
-.env.*
 .python/
 
-.tmp_pycache/
-output/
+# Build output (PyInstaller)
+dist/
+build/
+
+# Runtime data
+telemetry.json
+settings.json
+history.json
+*.enc
 mapping_*.json
+mapping_*.json.enc
 report_*.csv
 
+# Temp / cache
+.tmp_pycache/
+output/
+__pycache__/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
 .DS_Store
 Thumbs.db
+
+# Installer output (Inno Setup)
+installer/Output/

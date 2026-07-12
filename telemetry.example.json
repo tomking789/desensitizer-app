@@ -1,0 +1,4 @@
+{
+  "endpoint": "",
+  "update_check_url": "http://your-server-ip:8766/check-update"
+}

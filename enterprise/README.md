@@ -46,3 +46,23 @@ Logo 建议规格：
 - 文件大小建议小于 2MB。
 
 不要把未经客户确认的员工姓名、高管姓名、客户名单或供应商名单写入正式配置包。
+
+## 自动化构建（交付人员使用）
+
+提供客户 Logo 和词库后，一键生成定制安装包：
+
+```bash
+python scripts/build_enterprise.py \
+    --customer-name "客户全称" \
+    --customer-short-name "客户简称" \
+    --logo "客户logo.png" \
+    --terms "客户词库.csv"
+```
+
+脚本会自动：
+1. 生成 `profile.json` 和 `terms.csv`
+2. 运行 PyInstaller 编译可执行文件
+3. 注入企业配置到输出目录
+4. 调用 Inno Setup 生成 Windows 安装包（如需）
+
+详细 SOP 见 `marketing/企业定制交付SOP.md`。

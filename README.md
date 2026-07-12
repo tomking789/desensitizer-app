@@ -4,6 +4,8 @@
 
 当前定位：专业试用版。
 
+如需企业定制版（专属 Logo、企业词库、品牌标识、安装包），详见 `enterprise/README.md`。
+
 ## 许可证
 
 本项目接受 AGPL 约束，采用 GNU Affero General Public License v3.0 or later 授权。
@@ -165,6 +167,8 @@ start_desensitizer.cmd
 This is a local desktop desensitization tool for identifying, reviewing, and replacing sensitive information before sharing files with ChatGPT, Codex, or other AI applications.
 
 Current positioning: professional trial edition.
+
+For enterprise customization (custom logo, built-in terms, branded installer), see `enterprise/README.md`.
 
 ## License
 

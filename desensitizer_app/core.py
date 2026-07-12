@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import re
 from collections import Counter
 from pathlib import Path
 from typing import Iterable
@@ -8,6 +9,8 @@ from typing import Iterable
 from .candidates import ReplacementSpec
 from .mapping import MappingStore
 from .rules import find_sensitive_spans
+
+ZWSP_MARKER = "\u2060"  # WORD JOINER — invisible; marks code boundaries
 
 
 class DesensitizeError(Exception):
@@ -46,15 +49,33 @@ def apply_replacements_text(
     counts: Counter[str] = Counter()
     new_text = text
     unique_replacements = _dedupe_replacements(replacements)
+
+    codes = {r.replacement for r in unique_replacements if r.value and r.value != r.replacement}
+    conflicted = _prefix_conflict_codes(codes)
+
     for replacement in sorted(unique_replacements, key=lambda item: len(item.value), reverse=True):
         if not replacement.value or replacement.value == replacement.replacement:
             continue
         found = new_text.count(replacement.value)
         if not found:
             continue
-        new_text = new_text.replace(replacement.value, replacement.replacement)
+        code = replacement.replacement
+        if code in conflicted:
+            new_text = new_text.replace(replacement.value, code + ZWSP_MARKER)
+        else:
+            new_text = new_text.replace(replacement.value, code)
         counts[replacement.entity] += found
     return new_text, counts
+
+
+def _prefix_conflict_codes(codes: set[str]) -> set[str]:
+    conflicted: set[str] = set()
+    for code in codes:
+        for other in codes:
+            if code != other and other.startswith(code):
+                conflicted.add(code)
+                break
+    return conflicted
 
 
 def _dedupe_replacements(replacements: Iterable[ReplacementSpec]) -> list[ReplacementSpec]:

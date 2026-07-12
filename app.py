@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import queue
 import sys
@@ -38,6 +39,7 @@ from desensitizer_app.sensitive_table import (
     write_sensitive_template,
 )
 from desensitizer_app.telemetry import AnonymousTelemetry
+from desensitizer_app.update_checker import check_for_update
 
 
 APP_DIR = Path(__file__).resolve().parent
@@ -83,6 +85,180 @@ def _enable_dpi_awareness() -> None:
 
 
 _enable_dpi_awareness()
+
+
+class RoundedButton(Canvas):
+    """Canvas绘制的圆角按钮，支持hover效果和disabled状态"""
+    
+    def __init__(
+        self,
+        parent,
+        text: str,
+        command=None,
+        bg_color: str = "#3B82F6",
+        fg_color: str = "#FFFFFF",
+        hover_color: str = "#2563EB",
+        disabled_bg: str = "#E5E7EB",
+        disabled_fg: str = "#9CA3AF",
+        radius: int = 8,
+        height: int = 32,
+        font: tuple = None,
+        state: str = "normal",
+        auto_width: bool = True,
+        **kwargs,
+    ):
+        self._bg_color = bg_color
+        self._fg_color = fg_color
+        self._hover_color = hover_color
+        self._disabled_bg = disabled_bg
+        self._disabled_fg = disabled_fg
+        self._radius = radius
+        self._command = command
+        self._state = state
+        self._is_hovered = False
+        self._auto_width = auto_width
+        
+        if font is None:
+            import tkinter.font as tkfont
+            font_family = tkfont.nametofont("TkDefaultFont").actual("family")
+            font = (font_family, 9, "bold")
+        self._font = font
+        
+        self._text = text
+        
+        if auto_width and "width" not in kwargs:
+            import tkinter.font as tkfont
+            test_font = tkfont.Font(font=self._font)
+            text_width = test_font.measure(text) + 24
+            kwargs["width"] = max(80, text_width)
+        
+        super().__init__(parent, height=height, highlightthickness=0, **kwargs)
+        
+        self.bind("<Configure>", self._on_resize)
+        self.bind("<Enter>", self._on_enter)
+        self.bind("<Leave>", self._on_leave)
+        self.bind("<ButtonPress-1>", self._on_press)
+        self.bind("<ButtonRelease-1>", self._on_release)
+        
+        self.configure(cursor="hand2" if state == "normal" else "arrow")
+        
+        self._draw()
+    
+    def _draw(self):
+        try:
+            self.delete("all")
+            w = self.winfo_width()
+            h = self.winfo_height()
+            if w <= 1 or h <= 1:
+                return
+            
+            r = self._radius
+            if self._state == "disabled":
+                bg = self._disabled_bg
+                fg = self._disabled_fg
+            elif self._is_hovered:
+                bg = self._hover_color
+                fg = self._fg_color
+            else:
+                bg = self._bg_color
+                fg = self._fg_color
+            
+            self._draw_rounded_rect(0, 0, w, h, r, bg)
+            
+            self.create_text(
+                w // 2, h // 2,
+                text=self._text,
+                fill=fg,
+                font=self._font,
+                anchor="center",
+            )
+        except Exception:
+            pass
+    
+    def _draw_rounded_rect(self, x1, y1, x2, y2, r, fill):
+        points = [
+            x1 + r, y1,
+            x2 - r, y1,
+            x2, y1,
+            x2, y1 + r,
+            x2, y2 - r,
+            x2, y2,
+            x2 - r, y2,
+            x1 + r, y2,
+            x1, y2,
+            x1, y2 - r,
+            x1, y1 + r,
+            x1, y1,
+        ]
+        self.create_polygon(points, fill=fill, smooth=True)
+    
+    def _on_resize(self, event):
+        try:
+            self._draw()
+        except Exception:
+            pass
+    
+    def _on_enter(self, event):
+        if self._state == "normal":
+            self._is_hovered = True
+            self._draw()
+    
+    def _on_leave(self, event):
+        self._is_hovered = False
+        self._draw()
+    
+    def _on_press(self, event):
+        if self._state == "normal":
+            self._is_hovered = False
+            self._draw()
+    
+    def _on_release(self, event):
+        if self._state == "normal" and self._command:
+            try:
+                self._command()
+            except Exception:
+                pass
+            w = self.winfo_width()
+            h = self.winfo_height()
+            self._is_hovered = 0 <= event.x <= w and 0 <= event.y <= h
+            self._draw()
+    
+    def configure(self, **kwargs):
+        if "text" in kwargs:
+            self._text = kwargs.pop("text")
+            if self._auto_width:
+                import tkinter.font as tkfont
+                test_font = tkfont.Font(font=self._font)
+                text_width = test_font.measure(self._text) + 24
+                new_width = max(80, text_width)
+                try:
+                    super().configure(width=new_width)
+                except Exception:
+                    pass
+        if "state" in kwargs:
+            self._state = kwargs.pop("state")
+            self.configure(cursor="hand2" if self._state == "normal" else "arrow")
+        if "bg_color" in kwargs:
+            self._bg_color = kwargs.pop("bg_color")
+        if "fg_color" in kwargs:
+            self._fg_color = kwargs.pop("fg_color")
+        if "hover_color" in kwargs:
+            self._hover_color = kwargs.pop("hover_color")
+        if "command" in kwargs:
+            self._command = kwargs.pop("command")
+        if kwargs:
+            try:
+                super().configure(**kwargs)
+            except Exception:
+                pass
+        self._draw()
+    
+    def cget(self, key):
+        if key == "text":
+            return self._text
+        if key == "state":
+            return self._state
+        return super().cget(key)
 
 
 class DesensitizerApp:
@@ -162,12 +338,12 @@ class DesensitizerApp:
 
     def _set_initial_window_geometry(self) -> None:
         left, top, work_width, work_height = self._get_work_area()
-        width = min(max(1280, work_width - 48), work_width)
-        height = min(max(820, work_height - 64), work_height)
+        width = min(max(1000, work_width - 100), work_width)
+        height = min(max(650, work_height - 80), work_height)
         x = left + max(0, (work_width - width) // 2)
         y = top + max(0, (work_height - height) // 2)
         self.root.geometry(f"{width}x{height}+{x}+{y}")
-        self.root.minsize(1240, 760)
+        self.root.minsize(850, 550)
 
     def _get_work_area(self) -> tuple[int, int, int, int]:
         try:
@@ -195,13 +371,11 @@ class DesensitizerApp:
                 "settings": "设置",
                 "color": "颜色",
                 "light": "浅色",
-                "dark": "深色",
                 "blue": "商务蓝",
                 "green": "护眼绿",
                 "teal": "青绿色",
                 "purple": "淡紫色",
                 "graphite": "石墨灰",
-                "high_contrast": "高对比",
                 "language": "语言",
                 "chinese": "中文",
                 "english": "English",
@@ -274,6 +448,9 @@ class DesensitizerApp:
                 "tab_restore": "按映射还原",
                 "run_log": "运行日志",
                 "task_config": "任务配置",
+                "step1_title": "步骤 1: 添加文件",
+                "step2_title": "步骤 2: 配置敏感词",
+                "step3_title": "步骤 3: 执行脱敏",
                 "input_files": "输入文件",
                 "input_files_hint": "添加需要处理的文件或文件夹",
                 "upload_title": "将文件或文件夹添加到此处",
@@ -438,13 +615,11 @@ class DesensitizerApp:
                 "settings": "Settings",
                 "color": "Color",
                 "light": "Light",
-                "dark": "Dark",
                 "blue": "Business Blue",
                 "green": "Soft Green",
                 "teal": "Teal",
                 "purple": "Lavender",
                 "graphite": "Graphite",
-                "high_contrast": "High Contrast",
                 "language": "Language",
                 "chinese": "中文",
                 "english": "English",
@@ -519,6 +694,9 @@ class DesensitizerApp:
                 "tab_restore": "Restore by Mapping",
                 "run_log": "Run Log",
                 "task_config": "Task Configuration",
+                "step1_title": "Step 1: Add Files",
+                "step2_title": "Step 2: Configure Sensitive Words",
+                "step3_title": "Step 3: Execute Desensitization",
                 "input_files": "Input Files",
                 "input_files_hint": "Add files or folders to process",
                 "upload_title": "Add files or folders here",
@@ -706,13 +884,13 @@ class DesensitizerApp:
         else:
             family = "Segoe UI"
         font_specs = {
-            "TkDefaultFont": {"size": 10},
-            "TkTextFont": {"size": 10},
-            "TkMenuFont": {"size": 10},
-            "TkHeadingFont": {"size": 10, "weight": "bold"},
-            "TkCaptionFont": {"size": 10},
-            "TkSmallCaptionFont": {"size": 9},
-            "TkTooltipFont": {"size": 9},
+            "TkDefaultFont": {"size": 9},
+            "TkTextFont": {"size": 9},
+            "TkMenuFont": {"size": 9},
+            "TkHeadingFont": {"size": 9, "weight": "bold"},
+            "TkCaptionFont": {"size": 9},
+            "TkSmallCaptionFont": {"size": 8},
+            "TkTooltipFont": {"size": 8},
         }
         for name, options in font_specs.items():
             try:
@@ -737,7 +915,7 @@ class DesensitizerApp:
 
         settings_menu = Menu(self.menu_bar)
         color_menu = Menu(settings_menu)
-        for theme_key in ("light", "dark", "blue", "green", "teal", "purple", "graphite", "high_contrast"):
+        for theme_key in ("light", "blue", "green", "teal", "purple", "graphite"):
             color_menu.add_radiobutton(
                 label=self._text(theme_key),
                 variable=self.theme_var,
@@ -789,6 +967,7 @@ class DesensitizerApp:
         messagebox.showinfo(self._text("language_title"), self._text("language_message"))
 
     def _initialize_telemetry(self) -> None:
+        self._check_for_update()
         if not self.telemetry.has_endpoint():
             return
         if not self.telemetry.notice_seen():
@@ -802,6 +981,17 @@ class DesensitizerApp:
             self.telemetry_enabled_var.set(keep_enabled)
             self._refresh_menu()
         self._track_usage("app_start")
+
+    def _check_for_update(self) -> None:
+        try:
+            cfg_path = APP_HOME / "telemetry.json"
+            if cfg_path.exists():
+                cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+                url = cfg.get("update_check_url", "")
+                if url:
+                    check_for_update(__version__, url)
+        except Exception:
+            pass
 
     def _set_telemetry_enabled_from_menu(self) -> None:
         enabled = bool(self.telemetry_enabled_var.get())
@@ -834,84 +1024,64 @@ class DesensitizerApp:
         self.theme_var.set(theme)
         palettes = {
             "light": {
-                "bg": "#f4f6f8", "fg": "#101828", "muted": "#667085",
-                "surface": "#ffffff", "field": "#ffffff", "field_alt": "#f8fafc", "border": "#dde3ea",
-                "button": "#f0f3f7", "accent": "#1570ef", "accent_active": "#1054b5",
-                "accent_fg": "#ffffff", "select": "#dbeafe", "select_fg": "#0f172a",
-                "sidebar": "#1b2332", "sidebar_border": "#283347",
-                "sidebar_active": "#263046", "sidebar_hover": "#222e40",
-                "hover": "#e8edf4", "danger": "#d92d20", "danger_bg": "#fef3f2",
-                "success": "#12b76a", "heading_bg": "#f0f3f7",
-            },
-            "dark": {
-                "bg": "#0f1419", "fg": "#e6edf3", "muted": "#8b949e",
-                "surface": "#1c2128", "field": "#151a21", "field_alt": "#191f27", "border": "#30363d",
-                "button": "#21262d", "accent": "#79b8ff", "accent_active": "#58a6ff",
-                "accent_fg": "#0d1117", "select": "#21466f", "select_fg": "#ffffff",
-                "sidebar": "#111820", "sidebar_border": "#28313d",
-                "sidebar_active": "#1c2536", "sidebar_hover": "#171d26",
-                "hover": "#292e36", "danger": "#f97066", "danger_bg": "#3d1c1c",
-                "success": "#3fb950", "heading_bg": "#1c2128",
+                "bg": "#f5f7fa", "fg": "#1a1d21", "muted": "#6b7280",
+                "surface": "#ffffff", "field": "#ffffff", "field_alt": "#f9fafb", "border": "#e5e7eb",
+                "button": "#f3f4f6", "accent": "#3b82f6", "accent_active": "#2563eb",
+                "accent_fg": "#ffffff", "select": "#dbeafe", "select_fg": "#1e3a5f",
+                "sidebar": "#0f172a", "sidebar_border": "#1e293b",
+                "sidebar_active": "#1e293b", "sidebar_hover": "#1a2332",
+                "hover": "#f3f4f6", "danger": "#ef4444", "danger_bg": "#fef2f2",
+                "success": "#22c55e", "heading_bg": "#f9fafb",
             },
             "blue": {
-                "bg": "#f2f7fb", "fg": "#122033", "muted": "#577089",
-                "surface": "#ffffff", "field": "#ffffff", "field_alt": "#f5f9fd", "border": "#ccdcea",
-                "button": "#e6eff7", "accent": "#1769aa", "accent_active": "#115588",
-                "accent_fg": "#ffffff", "select": "#d4e8fa", "select_fg": "#122033",
-                "sidebar": "#152238", "sidebar_border": "#213353",
-                "sidebar_active": "#1e3050", "sidebar_hover": "#1a2a45",
-                "hover": "#dae8f4", "danger": "#c4320a", "danger_bg": "#fff4ed",
-                "success": "#2e8555", "heading_bg": "#e6eff7",
+                "bg": "#f0f4f8", "fg": "#0f172a", "muted": "#64748b",
+                "surface": "#ffffff", "field": "#ffffff", "field_alt": "#f8fafc", "border": "#cbd5e1",
+                "button": "#e2e8f0", "accent": "#0ea5e9", "accent_active": "#0284c7",
+                "accent_fg": "#ffffff", "select": "#e0f2fe", "select_fg": "#0c4a6e",
+                "sidebar": "#0c4a6e", "sidebar_border": "#075985",
+                "sidebar_active": "#075985", "sidebar_hover": "#0369a1",
+                "hover": "#e2e8f0", "danger": "#ef4444", "danger_bg": "#fef2f2",
+                "success": "#10b981", "heading_bg": "#f1f5f9",
             },
             "green": {
-                "bg": "#f3f8f4", "fg": "#17251d", "muted": "#5c7265",
-                "surface": "#ffffff", "field": "#ffffff", "field_alt": "#f6fbf7", "border": "#d0dfd5",
-                "button": "#e6f0e9", "accent": "#2b7a47", "accent_active": "#1f6336",
-                "accent_fg": "#ffffff", "select": "#d5eddf", "select_fg": "#17251d",
-                "sidebar": "#172420", "sidebar_border": "#253830",
-                "sidebar_active": "#1f3329", "sidebar_hover": "#1b2d24",
-                "hover": "#dae9df", "danger": "#c4320a", "danger_bg": "#fff4ed",
-                "success": "#2e8555", "heading_bg": "#e6f0e9",
+                "bg": "#f0fdf4", "fg": "#14532d", "muted": "#6b7280",
+                "surface": "#ffffff", "field": "#ffffff", "field_alt": "#f0fdf4", "border": "#bbf7d0",
+                "button": "#dcfce7", "accent": "#22c55e", "accent_active": "#16a34a",
+                "accent_fg": "#ffffff", "select": "#dcfce7", "select_fg": "#14532d",
+                "sidebar": "#14532d", "sidebar_border": "#166534",
+                "sidebar_active": "#166534", "sidebar_hover": "#15803d",
+                "hover": "#dcfce7", "danger": "#ef4444", "danger_bg": "#fef2f2",
+                "success": "#22c55e", "heading_bg": "#f0fdf4",
             },
             "teal": {
-                "bg": "#f2f8f7", "fg": "#142626", "muted": "#587272",
-                "surface": "#ffffff", "field": "#ffffff", "field_alt": "#f5fbfa", "border": "#c8dedd",
-                "button": "#e3f1f0", "accent": "#0e8177", "accent_active": "#0a6b63",
-                "accent_fg": "#ffffff", "select": "#d2edeb", "select_fg": "#142626",
-                "sidebar": "#122424", "sidebar_border": "#1d3838",
-                "sidebar_active": "#183232", "sidebar_hover": "#152c2c",
-                "hover": "#d8ecea", "danger": "#c4320a", "danger_bg": "#fff4ed",
-                "success": "#0e8177", "heading_bg": "#e3f1f0",
+                "bg": "#f0fdfa", "fg": "#134e4a", "muted": "#6b7280",
+                "surface": "#ffffff", "field": "#ffffff", "field_alt": "#f0fdfa", "border": "#99f6e4",
+                "button": "#ccfbf1", "accent": "#14b8a6", "accent_active": "#0d9488",
+                "accent_fg": "#ffffff", "select": "#ccfbf1", "select_fg": "#134e4a",
+                "sidebar": "#134e4a", "sidebar_border": "#115e59",
+                "sidebar_active": "#115e59", "sidebar_hover": "#0f766e",
+                "hover": "#ccfbf1", "danger": "#ef4444", "danger_bg": "#fef2f2",
+                "success": "#14b8a6", "heading_bg": "#f0fdfa",
             },
             "purple": {
-                "bg": "#f7f5fb", "fg": "#292436", "muted": "#6b6279",
-                "surface": "#ffffff", "field": "#ffffff", "field_alt": "#faf8fd", "border": "#d8d0e6",
-                "button": "#ede8f5", "accent": "#6941a8", "accent_active": "#553688",
-                "accent_fg": "#ffffff", "select": "#e6ddf4", "select_fg": "#292436",
-                "sidebar": "#1e1830", "sidebar_border": "#302648",
-                "sidebar_active": "#2a2042", "sidebar_hover": "#241c38",
-                "hover": "#e2daf0", "danger": "#c4320a", "danger_bg": "#fff4ed",
-                "success": "#5c33a0", "heading_bg": "#ede8f5",
+                "bg": "#faf5ff", "fg": "#581c87", "muted": "#6b7280",
+                "surface": "#ffffff", "field": "#ffffff", "field_alt": "#faf5ff", "border": "#d8b4fe",
+                "button": "#f3e8ff", "accent": "#a855f7", "accent_active": "#9333ea",
+                "accent_fg": "#ffffff", "select": "#f3e8ff", "select_fg": "#581c87",
+                "sidebar": "#581c87", "sidebar_border": "#6b21a8",
+                "sidebar_active": "#6b21a8", "sidebar_hover": "#7e22ce",
+                "hover": "#f3e8ff", "danger": "#ef4444", "danger_bg": "#fef2f2",
+                "success": "#a855f7", "heading_bg": "#faf5ff",
             },
             "graphite": {
-                "bg": "#f3f4f6", "fg": "#1f2937", "muted": "#6b7280",
-                "surface": "#ffffff", "field": "#ffffff", "field_alt": "#f8fafc", "border": "#d1d5db",
-                "button": "#e5e7eb", "accent": "#4b5563", "accent_active": "#374151",
-                "accent_fg": "#ffffff", "select": "#dfe3e8", "select_fg": "#1f2937",
+                "bg": "#f9fafb", "fg": "#1f2937", "muted": "#6b7280",
+                "surface": "#ffffff", "field": "#ffffff", "field_alt": "#f9fafb", "border": "#d1d5db",
+                "button": "#e5e7eb", "accent": "#6b7280", "accent_active": "#4b5563",
+                "accent_fg": "#ffffff", "select": "#e5e7eb", "select_fg": "#1f2937",
                 "sidebar": "#1f2937", "sidebar_border": "#374151",
-                "sidebar_active": "#2d3a4d", "sidebar_hover": "#283343",
-                "hover": "#dbe0e6", "danger": "#c4320a", "danger_bg": "#fff4ed",
-                "success": "#4b5563", "heading_bg": "#e5e7eb",
-            },
-            "high_contrast": {
-                "bg": "#000000", "fg": "#ffffff", "muted": "#ffffff",
-                "surface": "#0a0a0a", "field": "#000000", "field_alt": "#0f0f0f", "border": "#ffffff",
-                "button": "#1a1a1a", "accent": "#ffd400", "accent_active": "#e5be00",
-                "accent_fg": "#000000", "select": "#3a3a00", "select_fg": "#ffffff",
-                "sidebar": "#0a0a0a", "sidebar_border": "#ffffff",
-                "sidebar_active": "#2a2a00", "sidebar_hover": "#1a1a1a",
-                "hover": "#2a2a2a", "danger": "#ff4444", "danger_bg": "#330000",
-                "success": "#00ff00", "heading_bg": "#1a1a1a",
+                "sidebar_active": "#374151", "sidebar_hover": "#4b5563",
+                "hover": "#e5e7eb", "danger": "#ef4444", "danger_bg": "#fef2f2",
+                "success": "#6b7280", "heading_bg": "#f3f4f6",
             },
         }
         palette = palettes.get(theme, palettes["light"])
@@ -931,7 +1101,7 @@ class DesensitizerApp:
         self._style.configure("Sidebar.TFrame", background=palette["sidebar"])
         self._style.configure("Surface.TFrame", background=palette["surface"], relief="flat")
         self._style.configure("Section.TFrame", background=palette["surface"], relief="flat")
-        self._style.configure("Card.TFrame", background=palette["surface"], bordercolor=palette["border"], lightcolor=palette["surface"], darkcolor=palette["border"], relief="ridge", borderwidth=1)
+        self._style.configure("Card.TFrame", background=palette["surface"], bordercolor=palette["border"], lightcolor=palette["surface"], darkcolor=palette["border"], relief="flat", borderwidth=1)
         self._style.configure(
             "Content.TFrame",
             background=palette["surface"],
@@ -951,20 +1121,20 @@ class DesensitizerApp:
         self._style.configure("Statusbar.TFrame", background=palette["surface"])
         font_family = tkfont.nametofont("TkDefaultFont").actual("family")
         default_font = tkfont.nametofont("TkDefaultFont")
-        button_font = (font_family, 10)
-        heading_font = (font_family, 10, "bold")
+        button_font = (font_family, 9)
+        heading_font = (font_family, 9, "bold")
         self._style.configure("TLabelframe", background=palette["surface"], foreground=palette["fg"], bordercolor=palette["border"], relief="solid")
         self._style.configure("TLabelframe.Label", background=palette["bg"], foreground=palette["fg"], font=heading_font)
         self._style.configure("Card.TLabelframe", background=palette["surface"], foreground=palette["fg"], bordercolor=palette["border"], relief="solid")
         self._style.configure("Card.TLabelframe.Label", background=palette["bg"], foreground=palette["fg"], font=heading_font)
         self._style.configure("TLabel", background=palette["bg"], foreground=palette["fg"])
         self._style.configure("Surface.TLabel", background=palette["surface"], foreground=palette["fg"])
-        self._style.configure("Header.TLabel", background=palette["bg"], foreground=palette["fg"], font=(font_family, 13, "bold"))
-        self._style.configure("PageTitle.TLabel", background=palette["bg"], foreground=palette["fg"], font=(font_family, 15, "bold"))
-        self._style.configure("SidebarTitle.TLabel", background=palette["sidebar"], foreground="#ffffff", font=(font_family, 11, "bold"))
+        self._style.configure("Header.TLabel", background=palette["bg"], foreground=palette["fg"], font=(font_family, 11, "bold"))
+        self._style.configure("PageTitle.TLabel", background=palette["bg"], foreground=palette["fg"], font=(font_family, 12, "bold"))
+        self._style.configure("SidebarTitle.TLabel", background=palette["sidebar"], foreground="#ffffff", font=(font_family, 10, "bold"))
         self._style.configure("SidebarMuted.TLabel", background=palette["sidebar"], foreground="#94a3b8")
         self._style.configure("SidebarVersion.TLabel", background=palette["sidebar"], foreground="#64748b", font=(font_family, 8))
-        self._style.configure("SectionTitle.TLabel", background=palette["surface"], foreground=palette["fg"], font=(font_family, 12, "bold"))
+        self._style.configure("SectionTitle.TLabel", background=palette["surface"], foreground=palette["fg"], font=(font_family, 10, "bold"))
         self._style.configure("Muted.TLabel", background=palette["bg"], foreground=palette["muted"])
         self._style.configure("SurfaceMuted.TLabel", background=palette["surface"], foreground=palette["muted"])
         self._style.configure("Status.TLabel", background=palette["surface"], foreground=palette["muted"], padding=(14, 6))
@@ -978,32 +1148,33 @@ class DesensitizerApp:
             background=[("active", palette["surface"])],
             foreground=[("active", palette["fg"])],
         )
-        self._style.configure("TButton", background=palette["button"], foreground=palette["fg"], bordercolor=palette["border"], focusthickness=0, focuscolor=palette["button"], padding=(11, 7), relief="flat", borderwidth=1, font=button_font)
+        self._style.configure("TButton", background=palette["button"], foreground=palette["fg"], bordercolor=palette["border"], focusthickness=0, focuscolor=palette["button"], padding=(8, 4), relief="flat", borderwidth=1, font=button_font)
         self._style.map("TButton", background=[("active", palette["hover"]), ("pressed", palette["select"])], foreground=[("active", palette["fg"]), ("disabled", palette["muted"])])
-        self._style.configure("Tool.TButton", background=palette["surface"], foreground=palette["fg"], bordercolor=palette["border"], focusthickness=0, focuscolor=palette["surface"], padding=(11, 6), relief="flat", borderwidth=1, font=button_font)
+        self._style.configure("Tool.TButton", background=palette["surface"], foreground=palette["fg"], bordercolor=palette["border"], focusthickness=0, focuscolor=palette["surface"], padding=(8, 4), relief="flat", borderwidth=1, font=button_font)
         self._style.map("Tool.TButton", background=[("active", palette["hover"]), ("pressed", palette["select"])], foreground=[("active", palette["fg"])], bordercolor=[("active", palette["accent"]), ("pressed", palette["accent"])])
-        self._style.configure("Secondary.TButton", background=palette["surface"], foreground=palette["fg"], bordercolor=palette["border"], focusthickness=0, focuscolor=palette["surface"], padding=(11, 6), relief="flat", borderwidth=1, font=button_font)
+        self._style.configure("Secondary.TButton", background=palette["surface"], foreground=palette["fg"], bordercolor=palette["border"], focusthickness=0, focuscolor=palette["surface"], padding=(8, 4), relief="flat", borderwidth=1, font=button_font)
         self._style.map("Secondary.TButton", background=[("active", palette["hover"]), ("pressed", palette["select"])], foreground=[("active", palette["fg"]), ("disabled", palette["muted"])], bordercolor=[("active", palette["accent"]), ("pressed", palette["accent"]), ("disabled", palette["border"])])
-        self._style.configure("Danger.TButton", background=palette["surface"], foreground=palette["danger"], bordercolor=palette["border"], focusthickness=0, focuscolor=palette["surface"], padding=(11, 6), relief="flat", borderwidth=1, font=button_font)
+        self._style.configure("Danger.TButton", background=palette["surface"], foreground=palette["danger"], bordercolor=palette["border"], focusthickness=0, focuscolor=palette["surface"], padding=(8, 4), relief="flat", borderwidth=1, font=button_font)
         self._style.map("Danger.TButton", background=[("active", palette["danger_bg"]), ("pressed", palette["danger_bg"])], foreground=[("active", palette["danger"]), ("disabled", palette["muted"])], bordercolor=[("active", palette["danger"]), ("pressed", palette["danger"])])
-        self._style.configure("Accent.TButton", background=palette["accent"], foreground=palette["accent_fg"], bordercolor=palette["accent"], focusthickness=0, focuscolor=palette["accent"], padding=(20, 9), relief="flat", borderwidth=1, font=(font_family, 11, "bold"))
+        self._style.configure("Accent.TButton", background=palette["accent"], foreground=palette["accent_fg"], bordercolor=palette["accent"], focusthickness=0, focuscolor=palette["accent"], padding=(12, 6), relief="flat", borderwidth=0, font=(font_family, 9, "bold"))
         self._style.map(
             "Accent.TButton",
             background=[("disabled", palette["button"]), ("active", palette["accent_active"]), ("pressed", palette["accent_active"])],
             foreground=[("disabled", palette["muted"]), ("active", palette["accent_fg"]), ("pressed", palette["accent_fg"])],
             bordercolor=[("disabled", palette["border"]), ("active", palette["accent_active"]), ("pressed", palette["accent_active"])],
         )
-        self._style.configure("TEntry", fieldbackground=palette["field"], foreground=palette["fg"], bordercolor=palette["border"], padding=(8, 7), font=default_font)
+        self._style.configure("TEntry", fieldbackground=palette["field"], foreground=palette["fg"], bordercolor=palette["border"], padding=(6, 5), font=default_font)
         self._style.configure("TCombobox", fieldbackground=palette["field"], foreground=palette["fg"], font=default_font)
         self._style.configure("TNotebook", background=palette["bg"])
-        self._style.configure("TNotebook.Tab", background=palette["button"], foreground=palette["fg"], padding=(20, 10), font=button_font)
+        self._style.configure("TNotebook.Tab", background=palette["button"], foreground=palette["fg"], padding=(12, 6), font=button_font)
         self._style.map("TNotebook.Tab", background=[("selected", palette["field"])], foreground=[("selected", palette["fg"])])
-        self._style.configure("Vertical.TScrollbar", width=14, background=palette["button"], troughcolor=palette["surface"], bordercolor=palette["border"], arrowcolor=palette["muted"])
-        self._style.configure("Horizontal.TScrollbar", width=14, background=palette["button"], troughcolor=palette["surface"], bordercolor=palette["border"], arrowcolor=palette["muted"])
-        self._style.configure("Treeview", background=palette["field"], fieldbackground=palette["field"], foreground=palette["fg"], rowheight=32, bordercolor=palette["border"], lightcolor=palette["border"], darkcolor=palette["border"], font=default_font)
+        self._style.configure("Vertical.TScrollbar", width=10, background=palette["button"], troughcolor=palette["surface"], bordercolor=palette["border"], arrowcolor=palette["muted"])
+        self._style.configure("Horizontal.TScrollbar", width=10, background=palette["button"], troughcolor=palette["surface"], bordercolor=palette["border"], arrowcolor=palette["muted"])
+        self._style.configure("Treeview", background=palette["field"], fieldbackground=palette["field"], foreground=palette["fg"], rowheight=24, bordercolor=palette["border"], lightcolor=palette["border"], darkcolor=palette["border"], font=default_font)
         self._style.configure("Treeview.Heading", background=palette["heading_bg"], foreground=palette["fg"], relief="flat", font=heading_font)
         self._style.map("Treeview", background=[("selected", palette["select"])], foreground=[("selected", palette["select_fg"])])
         self._style.map("Treeview.Heading", background=[("active", palette["hover"])])
+
         for canvas in getattr(self, "_scroll_canvases", []):
             canvas.configure(background=palette["bg"])
         for button in getattr(self, "_primary_buttons", []):
@@ -1296,6 +1467,12 @@ class DesensitizerApp:
         y = root_y + max(0, (root_height - height) // 2)
         window.geometry(f"{width}x{height}+{x}+{y}")
 
+    def _fit_child_window(self, window: Toplevel, min_width: int, min_height: int, pad_width: int = 0, pad_height: int = 0) -> None:
+        window.update_idletasks()
+        width = max(min_width, window.winfo_reqwidth() + pad_width)
+        height = max(min_height, window.winfo_reqheight() + pad_height)
+        self._center_child_window(window, width, height)
+
     def _show_about(self) -> None:
         enterprise_lines = ""
         if self.enterprise_profile.enabled:
@@ -1345,49 +1522,48 @@ class DesensitizerApp:
         shell = ttk.Frame(self.root, style="App.TFrame")
         shell.pack(fill=BOTH, expand=True)
 
-        sidebar = ttk.Frame(shell, style="Sidebar.TFrame", width=260)
+        sidebar = ttk.Frame(shell, style="Sidebar.TFrame", width=150)
         sidebar.pack(side=LEFT, fill="y")
         sidebar.pack_propagate(False)
 
         brand = ttk.Frame(sidebar, style="Sidebar.TFrame")
-        brand.pack(fill="x", padx=20, pady=(24, 0))
-        ttk.Label(brand, text=self.enterprise_profile.product_name or self._text("app_title"), style="SidebarTitle.TLabel", wraplength=220).pack(anchor="w")
-        ttk.Label(brand, text=self._edition_label(), style="SidebarMuted.TLabel").pack(anchor="w", pady=(4, 0))
+        brand.pack(fill="x", padx=10, pady=(10, 0))
+        ttk.Label(brand, text=self.enterprise_profile.product_name or self._text("app_title"), style="SidebarTitle.TLabel", wraplength=130).pack(anchor="w")
+        ttk.Label(brand, text=self._edition_label(), style="SidebarMuted.TLabel").pack(anchor="w", pady=(2, 0))
 
         # Brand / nav separator
         palette = getattr(self, "_palette", {"sidebar_border": "#283347"})
         sep = Canvas(sidebar, height=1, borderwidth=0, highlightthickness=0, background=palette["sidebar_border"])
-        sep.pack(fill="x", padx=20, pady=(18, 14))
+        sep.pack(fill="x", padx=10, pady=(8, 6))
 
         nav = ttk.Frame(sidebar, style="Sidebar.TFrame")
-        nav.pack(fill="x", padx=14, pady=(0, 12))
-        self._segmented_button(nav, "anonymize", "\U0001f512  " + self._text("tab_anonymize")).pack(fill="x", pady=(0, 4))
+        nav.pack(fill="x", padx=6, pady=(0, 6))
+        self._segmented_button(nav, "anonymize", "\U0001f512  " + self._text("tab_anonymize")).pack(fill="x", pady=(0, 2))
         self._segmented_button(nav, "restore", "\U0001f504  " + self._text("tab_restore")).pack(fill="x")
 
         # Version at sidebar bottom
         version_frame = ttk.Frame(sidebar, style="Sidebar.TFrame")
-        version_frame.pack(side="bottom", fill="x", padx=20, pady=(0, 16))
+        version_frame.pack(side="bottom", fill="x", padx=10, pady=(0, 8))
         ttk.Label(version_frame, text=f"v{__version__}", style="SidebarVersion.TLabel").pack(anchor="w")
 
         workspace = ttk.Frame(shell, style="Workspace.TFrame")
         workspace.pack(side=LEFT, fill=BOTH, expand=True)
 
         topbar = ttk.Frame(workspace, style="Workspace.TFrame")
-        topbar.pack(fill="x", padx=28, pady=(24, 16))
+        topbar.pack(fill="x", padx=16, pady=(10, 6))
         ttk.Label(topbar, textvariable=self.page_title_var, style="PageTitle.TLabel").pack(side=LEFT)
 
         content_host = ttk.Frame(workspace, style="Workspace.TFrame")
-        content_host.pack(fill=BOTH, expand=True, padx=28, pady=(0, 0))
+        content_host.pack(fill=BOTH, expand=True, padx=16, pady=(0, 8))
         self.anonymize_tab, self.anonymize_frame = self._create_scrollable_tab(content_host)
         self.restore_tab, self.restore_frame = self._create_scrollable_tab(content_host)
 
         # Bottom status bar
-        statusbar = ttk.Frame(workspace, style="Statusbar.TFrame", height=34)
+        statusbar = ttk.Frame(workspace, style="Statusbar.TFrame", height=28)
         statusbar.pack(fill="x", side="bottom", padx=0, pady=(0, 0))
         statusbar.pack_propagate(False)
         self.statusbar_label = ttk.Label(statusbar, textvariable=self.status_var, style="Status.TLabel")
-        self.statusbar_label.pack(side=LEFT, padx=(14, 0))
-        ttk.Label(statusbar, text=f"v{__version__}", style="Status.TLabel", foreground="#9ca3af").pack(side=RIGHT, padx=(0, 14))
+        self.statusbar_label.pack(side=LEFT, padx=(10, 0))
 
         self._build_anonymize_tab()
         self._build_restore_tab()
@@ -1442,6 +1618,8 @@ class DesensitizerApp:
             canvas.unbind_all("<MouseWheel>")
 
         def on_mousewheel(event) -> None:
+            if self._event_originates_from_scrollable_tree(event, getattr(self, "candidate_tree", None)):
+                return "break"
             canvas.yview_scroll(int(-event.delta / 120), "units")
 
         content.bind("<Configure>", update_scroll_region)
@@ -1454,32 +1632,73 @@ class DesensitizerApp:
         self._scroll_canvases.append(canvas)
         return outer, content
 
+    def _event_originates_from_widget(self, event, widget: object | None) -> bool:
+        if widget is None:
+            return False
+        try:
+            current = event.widget
+            target = str(widget)
+            while current is not None:
+                if str(current) == target:
+                    return True
+                parent_name = getattr(current, "winfo_parent", lambda: "")()
+                if not parent_name:
+                    break
+                current = current.nametowidget(parent_name)
+        except Exception:
+            return False
+        return False
+
+    def _scroll_tree_with_mousewheel(self, tree: ttk.Treeview, event) -> str | None:
+        if not self._tree_can_scroll_with_mousewheel(tree, event):
+            return None
+        direction = self._mousewheel_direction(event)
+        tree.yview_scroll(direction, "units")
+        return "break"
+
+    def _event_originates_from_scrollable_tree(self, event, tree: ttk.Treeview | None) -> bool:
+        return self._event_originates_from_widget(event, tree) and bool(tree) and self._tree_can_scroll_with_mousewheel(tree, event)
+
+    def _tree_can_scroll_with_mousewheel(self, tree: ttk.Treeview, event) -> bool:
+        first, last = tree.yview()
+        if first <= 0 and last >= 1:
+            return False
+        direction = self._mousewheel_direction(event)
+        if direction < 0 and first <= 0:
+            return False
+        if direction > 0 and last >= 1:
+            return False
+        return True
+
+    def _mousewheel_direction(self, event) -> int:
+        return -1 if event.delta > 0 else 1
+
     def _card(self, parent: ttk.Frame, title: str) -> tuple[ttk.Frame, ttk.Frame]:
-        card = ttk.Frame(parent, style="Card.TFrame", padding=(20, 18, 20, 18))
-        ttk.Label(card, text=title, style="SectionTitle.TLabel").pack(fill="x", anchor="w", pady=(0, 6))
-        palette = getattr(self, "_palette", {"border": "#e0e4ea"})
+        card = ttk.Frame(parent, style="Card.TFrame", padding=(12, 10, 12, 10))
+        ttk.Label(card, text=title, style="SectionTitle.TLabel").pack(fill="x", anchor="w", pady=(0, 4))
+        palette = getattr(self, "_palette", {"border": "#e5e7eb"})
         sep = Canvas(card, height=1, borderwidth=0, highlightthickness=0, background=palette["border"])
-        sep.pack(fill="x", pady=(0, 14))
+        sep.pack(fill="x", pady=(0, 8))
         body = ttk.Frame(card, style="Surface.TFrame")
         body.pack(fill=BOTH, expand=True)
         return card, body
 
     def _build_upload_area(self, parent: ttk.Frame) -> Canvas:
-        palette = getattr(self, "_palette", {"surface": "#ffffff", "border": "#e4e7ed", "accent": "#1d4ed8", "muted": "#667085", "fg": "#101828"})
+        palette = getattr(self, "_palette", {"surface": "#ffffff", "border": "#e5e7eb", "accent": "#3b82f6", "muted": "#6b7280", "fg": "#1a1d21"})
         font_family = tkfont.nametofont("TkDefaultFont").actual("family")
-        canvas = Canvas(parent, height=132, borderwidth=0, highlightthickness=0, cursor="hand2", background=palette["surface"])
+        canvas = Canvas(parent, height=70, borderwidth=0, highlightthickness=0, cursor="hand2", background=palette["surface"])
 
         def redraw(event=None) -> None:
             width = event.width if event else max(640, canvas.winfo_width())
-            height = event.height if event else 132
+            height = event.height if event else 70
             canvas.delete("all")
-            panel_fill = "#fbfdff" if self.current_theme == "light" else palette["button"]
-            canvas.create_rectangle(8, 8, width - 8, height - 8, fill=panel_fill, outline=palette["border"], dash=(6, 5), width=2)
+            panel_fill = "#f8fafc" if self.current_theme == "light" else palette["button"]
+            canvas.create_rectangle(6, 6, width - 6, height - 6, fill=panel_fill, outline=palette["border"], dash=(4, 3), width=1)
 
             cx = width // 2
-            prompt = "Drop files here or click to upload" if self.language == "en" else "\u62d6\u52a8\u6587\u4ef6\u5230\u6b64\u5904\u6216\u70b9\u51fb\u4e0a\u4f20"
-            canvas.create_text(cx, 44, text="\U0001f4c1", fill=palette["accent"], font=(font_family, 24, "bold"))
-            canvas.create_text(cx, 92, text=prompt, fill=palette["fg"], font=(font_family, 11, "bold"))
+            text = "点击选择文件，或使用下方按钮添加" if self.language == "zh" else "Click to select files, or use buttons below"
+            canvas.create_text(cx, 30, text="\u2601\ufe0f", fill=palette["accent"], font=(font_family, 18))
+            canvas.create_text(cx, 55, text=text, fill=palette["fg"], font=(font_family, 9))
 
         canvas.bind("<Configure>", redraw)
         canvas.bind("<Button-1>", lambda _event: self.add_files())
@@ -1494,117 +1713,150 @@ class DesensitizerApp:
         body.pack(fill=BOTH, expand=True)
         return section, body
 
-    def _primary_button(self, parent: ttk.Frame, text: str, command) -> Button:
-        font_family = tkfont.nametofont("TkDefaultFont").actual("family")
-        button = Button(
+    def _primary_button(self, parent: ttk.Frame, text: str, command) -> RoundedButton:
+        palette = getattr(self, "_palette", {"accent": "#3b82f6", "accent_fg": "#ffffff", "accent_active": "#2563eb", "button": "#e5e7eb", "muted": "#9ca3af"})
+        button = RoundedButton(
             parent,
             text=text,
             command=command,
-            font=(font_family, 10, "bold"),
-            width=12,
-            padx=20,
-            pady=9,
-            relief="flat",
-            borderwidth=1,
-            highlightthickness=1,
-            cursor="hand2",
-            takefocus=True,
+            bg_color=palette.get("accent", "#3b82f6"),
+            fg_color=palette.get("accent_fg", "#ffffff"),
+            hover_color=palette.get("accent_active", "#2563eb"),
+            disabled_bg=palette.get("button", "#e5e7eb"),
+            disabled_fg=palette.get("muted", "#9ca3af"),
+            radius=8,
+            height=32,
+            auto_width=True,
         )
         self._primary_buttons.append(button)
-        palette = getattr(self, "_palette", None)
-        if palette:
-            self._style_primary_button(button, palette)
         return button
 
     def _style_primary_button(self, button: object, palette: dict[str, str]) -> None:
         try:
-            if not isinstance(button, Button):
+            if not isinstance(button, RoundedButton):
                 return
             disabled = str(button.cget("state")) == "disabled"
-            background = palette["button"] if disabled else palette["accent"]
-            foreground = palette["muted"] if disabled else palette["accent_fg"]
-            border = palette["border"] if disabled else palette["accent"]
             button.configure(
-                background=background,
-                foreground=foreground,
-                activebackground=palette["hover"] if disabled else palette["accent_active"],
-                activeforeground=foreground,
-                disabledforeground=palette["muted"],
-                highlightbackground=border,
-                highlightcolor=border,
-                relief="flat",
-                borderwidth=1,
-                width=12,
-                cursor="arrow" if disabled else "hand2",
+                bg_color=palette.get("button", "#e5e7eb") if disabled else palette.get("accent", "#3b82f6"),
+                fg_color=palette.get("muted", "#9ca3af") if disabled else palette.get("accent_fg", "#ffffff"),
+                hover_color=palette.get("accent_active", "#2563eb"),
+                state="disabled" if disabled else "normal",
             )
         except Exception:
             pass
 
-    def _tool_button(self, parent: ttk.Frame, text: str, command) -> ttk.Button:
-        button = ttk.Button(
+    def _tool_button(self, parent: ttk.Frame, text: str, command) -> RoundedButton:
+        palette = getattr(self, "_palette", {"surface": "#ffffff", "fg": "#1a1d21", "border": "#e5e7eb", "hover": "#f3f4f6", "button": "#e5e7eb", "muted": "#9ca3af"})
+        button = RoundedButton(
             parent,
             text=text,
             command=command,
-            style="Tool.TButton",
+            bg_color=palette.get("surface", "#ffffff"),
+            fg_color=palette.get("fg", "#1a1d21"),
+            hover_color=palette.get("hover", "#f3f4f6"),
+            disabled_bg=palette.get("button", "#e5e7eb"),
+            disabled_fg=palette.get("muted", "#9ca3af"),
+            radius=6,
+            height=28,
+            auto_width=True,
         )
         self._tool_buttons.append(button)
-        palette = getattr(self, "_palette", None)
-        if palette:
-            self._style_tool_button(button, palette)
         return button
 
-    def _style_tool_button(self, button: ttk.Button, palette: dict[str, str]) -> None:
+    def _style_tool_button(self, button: object, palette: dict[str, str]) -> None:
         try:
-            button.configure(style="Tool.TButton")
+            if not isinstance(button, RoundedButton):
+                return
+            disabled = str(button.cget("state")) == "disabled"
+            button.configure(
+                bg_color=palette.get("button", "#e5e7eb") if disabled else palette.get("surface", "#ffffff"),
+                fg_color=palette.get("muted", "#9ca3af") if disabled else palette.get("fg", "#1a1d21"),
+                hover_color=palette.get("hover", "#f3f4f6"),
+                state="disabled" if disabled else "normal",
+            )
         except Exception:
             pass
 
-    def _secondary_button(self, parent: ttk.Frame, text: str, command) -> ttk.Button:
-        button = self._tool_button(parent, text, command)
-        self._tool_buttons.remove(button)
+    def _secondary_button(self, parent: ttk.Frame, text: str, command) -> RoundedButton:
+        palette = getattr(self, "_palette", {"surface": "#ffffff", "fg": "#1a1d21", "border": "#e5e7eb", "hover": "#f3f4f6", "button": "#e5e7eb", "muted": "#9ca3af"})
+        button = RoundedButton(
+            parent,
+            text=text,
+            command=command,
+            bg_color=palette.get("surface", "#ffffff"),
+            fg_color=palette.get("fg", "#1a1d21"),
+            hover_color=palette.get("hover", "#f3f4f6"),
+            disabled_bg=palette.get("button", "#e5e7eb"),
+            disabled_fg=palette.get("muted", "#9ca3af"),
+            radius=8,
+            height=32,
+            auto_width=True,
+        )
         self._secondary_buttons.append(button)
-        palette = getattr(self, "_palette", None)
-        if palette:
-            self._style_secondary_button(button, palette)
         return button
 
-    def _style_secondary_button(self, button: ttk.Button, palette: dict[str, str]) -> None:
+    def _style_secondary_button(self, button: object, palette: dict[str, str]) -> None:
         try:
-            button.configure(style="Secondary.TButton")
+            if not isinstance(button, RoundedButton):
+                return
+            disabled = str(button.cget("state")) == "disabled"
+            button.configure(
+                bg_color=palette.get("button", "#e5e7eb") if disabled else palette.get("surface", "#ffffff"),
+                fg_color=palette.get("muted", "#9ca3af") if disabled else palette.get("fg", "#1a1d21"),
+                hover_color=palette.get("hover", "#f3f4f6"),
+                state="disabled" if disabled else "normal",
+            )
         except Exception:
             pass
 
-    def _danger_button(self, parent: ttk.Frame, text: str, command) -> ttk.Button:
-        button = self._tool_button(parent, text, command)
-        self._tool_buttons.remove(button)
+    def _danger_button(self, parent: ttk.Frame, text: str, command) -> RoundedButton:
+        palette = getattr(self, "_palette", {"danger": "#ef4444", "danger_fg": "#ffffff", "danger_active": "#dc2626", "button": "#e5e7eb", "muted": "#9ca3af"})
+        button = RoundedButton(
+            parent,
+            text=text,
+            command=command,
+            bg_color=palette.get("danger", "#ef4444"),
+            fg_color=palette.get("danger_fg", "#ffffff"),
+            hover_color=palette.get("danger_active", "#dc2626"),
+            disabled_bg=palette.get("button", "#e5e7eb"),
+            disabled_fg=palette.get("muted", "#9ca3af"),
+            radius=8,
+            height=32,
+            auto_width=True,
+        )
         self._danger_buttons.append(button)
-        palette = getattr(self, "_palette", None)
-        if palette:
-            self._style_danger_button(button, palette)
         return button
 
-    def _style_danger_button(self, button: ttk.Button, palette: dict[str, str]) -> None:
+    def _style_danger_button(self, button: object, palette: dict[str, str]) -> None:
         try:
-            button.configure(style="Danger.TButton")
+            if not isinstance(button, RoundedButton):
+                return
+            disabled = str(button.cget("state")) == "disabled"
+            button.configure(
+                bg_color=palette.get("button", "#e5e7eb") if disabled else palette.get("danger", "#ef4444"),
+                fg_color=palette.get("muted", "#9ca3af") if disabled else palette.get("danger_fg", "#ffffff"),
+                hover_color=palette.get("danger_active", "#dc2626"),
+                state="disabled" if disabled else "normal",
+            )
         except Exception:
             pass
 
     def _segmented_button(self, parent: ttk.Frame, key: str, text: str) -> ttk.Frame:
         font_family = tkfont.nametofont("TkDefaultFont").actual("family")
-        item = ttk.Frame(parent, style="Sidebar.TFrame", height=44)
+        item = ttk.Frame(parent, style="Sidebar.TFrame", height=32)
         item.pack_propagate(False)
-        indicator = Canvas(item, width=3, height=28, borderwidth=0, highlightthickness=0)
-        indicator.pack(side=LEFT, padx=(0, 8), pady=(8, 8))
+        indicator = Canvas(item, width=3, height=20, borderwidth=0, highlightthickness=0)
+        indicator.pack(side=LEFT, padx=(0, 6), pady=(6, 6))
         button = Button(
             item,
             text=text,
             command=lambda tab_key=key: self._show_main_tab(tab_key),
-            font=(font_family, 10, "bold"),
+            font=(font_family, 9),
             relief="flat",
             borderwidth=0,
             highlightthickness=0,
-            padx=10,
-            pady=7,
+            padx=6,
+            pady=3,
             cursor="hand2",
             takefocus=True,
             anchor="w",
@@ -1642,9 +1894,9 @@ class DesensitizerApp:
             if isinstance(frame, ttk.Frame):
                 frame.configure(style="Sidebar.TFrame")
             if isinstance(indicator, Canvas):
-                indicator.configure(background=palette["sidebar"], width=3, height=28)
+                indicator.configure(background=palette["sidebar"], width=3, height=20)
                 indicator.delete("all")
-                indicator.create_rectangle(0, 0, 3, 28, fill=indicator_fill, outline=indicator_fill)
+                indicator.create_rectangle(0, 0, 3, 20, fill=indicator_fill, outline=indicator_fill)
             button.configure(
                 background=background,
                 foreground=foreground,
@@ -1777,7 +2029,7 @@ class DesensitizerApp:
             text=text,
             variable=variable,
             indicatoron=False,
-            font=(font_family, 10),
+            font=(font_family, 9),
             relief="flat",
             borderwidth=0,
             highlightthickness=1,
@@ -1822,69 +2074,54 @@ class DesensitizerApp:
         top = ttk.Frame(self.anonymize_frame, style="Workspace.TFrame")
         top.pack(fill=BOTH, expand=True)
 
-        task_card, task_body = self._card(top, self._text("task_config"))
-        task_card.pack(fill=BOTH, expand=False, padx=0, pady=(0, 10))
+        # ===== 步骤 1: 添加文件 =====
+        step1_card, step1_body = self._card(top, self._text("step1_title"))
+        step1_card.pack(fill=BOTH, expand=False, padx=0, pady=(0, 8))
 
-        upload_row = ttk.Frame(task_body, style="Surface.TFrame")
+        upload_row = ttk.Frame(step1_body, style="Surface.TFrame")
         upload_row.pack(fill="x")
         self._build_upload_area(upload_row)
 
-        upload_actions = ttk.Frame(task_body, style="Surface.TFrame")
-        upload_actions.pack(fill="x", pady=(8, 10))
-        self._secondary_button(upload_actions, text=self._text("add_file"), command=self.add_files).pack(side=LEFT, padx=(0, 12))
-        self._secondary_button(upload_actions, text=self._text("add_folder"), command=self.add_folder).pack(side=LEFT, padx=(0, 12))
+        upload_actions = ttk.Frame(step1_body, style="Surface.TFrame")
+        upload_actions.pack(fill="x", pady=(6, 8))
+        self._secondary_button(upload_actions, text="\u2795 " + self._text("add_file"), command=self.add_files).pack(side=LEFT, padx=(0, 8))
+        self._secondary_button(upload_actions, text="\u2795 " + self._text("add_folder"), command=self.add_folder).pack(side=LEFT, padx=(0, 8))
         self._checkbox(upload_actions, self._text("recursive_folders"), self.recursive_scan).pack(side=LEFT)
+        self._danger_button(upload_actions, text="\U0001f5d1 " + self._text("remove_selected"), command=self.remove_selected_files).pack(side=RIGHT)
+        self._danger_button(upload_actions, text="\U0001f9f9 " + self._text("clear"), command=self.clear_files).pack(side=RIGHT, padx=(0, 8))
+        ttk.Label(upload_actions, textvariable=self.file_count_var, style="SurfaceMuted.TLabel").pack(side=RIGHT, padx=(0, 8))
 
-        file_meta = ttk.Frame(task_body, style="Surface.TFrame")
-        file_meta.pack(fill="x", pady=(0, 6))
-        ttk.Label(file_meta, textvariable=self.file_count_var, style="SurfaceMuted.TLabel").pack(side=LEFT)
-        self._danger_button(file_meta, text=self._text("clear"), command=self.clear_files).pack(side=RIGHT)
-        self._secondary_button(file_meta, text=self._text("remove_selected"), command=self.remove_selected_files).pack(side=RIGHT, padx=(0, 12))
-
-        self.file_list = ttk.Treeview(task_body, columns=("path",), show="headings", height=3)
+        self.file_list = ttk.Treeview(step1_body, columns=("path",), show="headings", height=2)
         self.file_list.heading("path", text=self._text("file_path"))
-        self.file_list.column("path", width=1040, anchor="w")
-        self.file_list.pack(fill="x", expand=False, pady=(0, 10))
+        self.file_list.column("path", width=700, anchor="w")
+        self.file_list.pack(fill="x", expand=False)
 
-        ttk.Label(task_body, text=self._text("output_dir"), style="Surface.TLabel").pack(fill="x", anchor="w", pady=(0, 5))
-        output_path_row = ttk.Frame(task_body, style="Surface.TFrame")
-        output_path_row.pack(fill="x")
-        self._secondary_button(output_path_row, text=self._text("choose"), command=self.choose_output_dir).pack(side=RIGHT)
-        ttk.Entry(output_path_row, textvariable=self.output_dir).pack(side=LEFT, fill="x", expand=True, padx=(0, 12))
-        output_options_row = ttk.Frame(task_body, style="Surface.TFrame")
-        output_options_row.pack(fill="x", pady=(8, 0))
-        self._checkbox(output_options_row, self._text("encrypt_mapping"), self.encrypt_mapping).pack(side=LEFT, padx=(0, 16))
-        self._checkbox(output_options_row, self._text("remove_headers_footers"), self.remove_headers_footers).pack(side=LEFT)
+        # ===== 步骤 2: 配置敏感词 =====
+        step2_card, step2_body = self._card(top, self._text("step2_title"))
+        step2_card.pack(fill=BOTH, expand=False, padx=0, pady=(0, 8))
 
-        candidate_card, candidate_frame = self._card(top, self._text("candidate_frame"))
-        candidate_card.pack(fill=BOTH, expand=True, padx=0, pady=(0, 0))
+        scan_row = ttk.Frame(step2_body, style="Surface.TFrame")
+        scan_row.pack(fill="x", pady=(0, 6))
+        self.scan_action_button = self._secondary_button(scan_row, text="\u26a1 " + self._text("auto_scan"), command=self.start_auto_scan_candidates)
+        self.scan_action_button.pack(side=LEFT, padx=(0, 6))
+        self._secondary_button(scan_row, text="+ " + self._text("add_manual"), command=self._show_manual_candidate_dialog).pack(side=LEFT, padx=(0, 6))
 
-        candidate_toolbar = ttk.Frame(candidate_frame, style="Surface.TFrame")
-        candidate_toolbar.pack(fill="x", pady=(0, 14))
-        primary_actions = ttk.Frame(candidate_toolbar, style="Surface.TFrame")
-        primary_actions.pack(fill="x")
-        self.scan_action_button = self._secondary_button(primary_actions, text=self._text("auto_scan"), command=self.start_auto_scan_candidates)
-        self.scan_action_button.pack(side=LEFT, padx=(0, 8))
-        self._secondary_button(primary_actions, text=self._text("add_manual"), command=self._show_manual_candidate_dialog).pack(side=LEFT, padx=(0, 8))
-        self.anonymize_action_button = self._primary_button(primary_actions, text=self._text("start_anonymize"), command=self.start_anonymize)
-        self.page_action_button = self.anonymize_action_button
-        self.anonymize_action_button.pack(side=RIGHT)
+        # 候选信息按钮行（紧凑布局）
+        candidate_actions = ttk.Frame(step2_body, style="Surface.TFrame")
+        candidate_actions.pack(fill="x")
+        self._secondary_button(candidate_actions, text="\u2611 全启", command=self.enable_all_candidates).pack(side=LEFT, padx=(0, 3))
+        self._secondary_button(candidate_actions, text="\u2610 全禁", command=self.disable_all_candidates).pack(side=LEFT, padx=(0, 3))
+        self._secondary_button(candidate_actions, text="\u21c4 切换", command=self.toggle_selected_candidates).pack(side=LEFT, padx=(0, 8))
+        self._secondary_button(candidate_actions, text="模板", command=self.download_sensitive_template).pack(side=LEFT, padx=(0, 3))
+        self._secondary_button(candidate_actions, text="导入", command=self.import_sensitive_table).pack(side=LEFT, padx=(0, 3))
+        self._secondary_button(candidate_actions, text="导出", command=self.export_sensitive_table).pack(side=LEFT, padx=(0, 8))
+        self._danger_button(candidate_actions, text="删除", command=self.delete_selected_candidates).pack(side=LEFT, padx=(0, 3))
+        self._danger_button(candidate_actions, text="清空", command=self.clear_candidates).pack(side=LEFT)
 
-        utility_actions = ttk.Frame(candidate_toolbar, style="Surface.TFrame")
-        utility_actions.pack(fill="x", pady=(8, 0))
-        self._secondary_button(utility_actions, text=self._text("download_template"), command=self.download_sensitive_template).pack(side=LEFT, padx=(0, 8))
-        self._secondary_button(utility_actions, text=self._text("import_sensitive_table"), command=self.import_sensitive_table).pack(side=LEFT, padx=(0, 8))
-        self._secondary_button(utility_actions, text=self._text("export_sensitive_table"), command=self.export_sensitive_table).pack(side=LEFT, padx=(0, 8))
-        self._secondary_button(utility_actions, text=self._text("enable_all"), command=self.enable_all_candidates).pack(side=LEFT, padx=(0, 8))
-        self._secondary_button(utility_actions, text=self._text("disable_all"), command=self.disable_all_candidates).pack(side=LEFT, padx=(0, 8))
-        self._secondary_button(utility_actions, text=self._text("toggle_selected"), command=self.toggle_selected_candidates).pack(side=LEFT, padx=(0, 8))
-        self._danger_button(utility_actions, text=self._text("delete_selected"), command=self.delete_selected_candidates).pack(side=LEFT, padx=(0, 8))
-        self._danger_button(utility_actions, text=self._text("clear_candidates"), command=self.clear_candidates).pack(side=LEFT)
-
-        table_frame = ttk.Frame(candidate_frame, style="Surface.TFrame")
+        table_frame = ttk.Frame(step2_body, style="Surface.TFrame")
         table_frame.pack(fill=BOTH, expand=True)
         columns = ("enabled", "value", "replacement", "context", "count", "files", "source", "action")
-        self.candidate_tree = ttk.Treeview(table_frame, columns=columns, show="headings", height=9)
+        self.candidate_tree = ttk.Treeview(table_frame, columns=columns, show="headings", height=4)
         headings = {
             "enabled": self._text("col_enabled"),
             "value": self._text("col_value"),
@@ -1896,14 +2133,14 @@ class DesensitizerApp:
             "action": self._text("col_action"),
         }
         widths = {
-            "enabled": 70,
-            "value": 170,
-            "replacement": 170,
-            "context": 120,
-            "count": 50,
-            "files": 140,
-            "source": 60,
-            "action": 70,
+            "enabled": 45,
+            "value": 100,
+            "replacement": 100,
+            "context": 80,
+            "count": 35,
+            "files": 90,
+            "source": 45,
+            "action": 50,
         }
         for column in columns:
             self.candidate_tree.heading(column, text=headings[column])
@@ -1912,9 +2149,31 @@ class DesensitizerApp:
         self.candidate_tree.configure(yscrollcommand=yscroll.set)
         self.candidate_tree.pack(side=LEFT, fill=BOTH, expand=True)
         yscroll.pack(side=RIGHT, fill="y")
+        self.candidate_tree.bind("<MouseWheel>", lambda event: self._scroll_tree_with_mousewheel(self.candidate_tree, event))
         self.candidate_tree.bind("<<TreeviewSelect>>", self.on_candidate_selected)
         self.candidate_tree.bind("<Double-1>", self._on_candidate_tree_double_click)
         self.candidate_tree.bind("<ButtonRelease-1>", self._on_candidate_tree_click)
+
+        # ===== 步骤 3: 执行脱敏 =====
+        step3_card, step3_body = self._card(top, self._text("step3_title"))
+        step3_card.pack(fill=BOTH, expand=False, padx=0, pady=(0, 0))
+
+        output_row = ttk.Frame(step3_body, style="Surface.TFrame")
+        output_row.pack(fill="x", pady=(0, 6))
+        ttk.Label(output_row, text=self._text("output_dir") + ":", style="Surface.TLabel").pack(side=LEFT)
+        self._secondary_button(output_row, text="选择", command=self.choose_output_dir).pack(side=RIGHT)
+        ttk.Entry(output_row, textvariable=self.output_dir).pack(side=LEFT, fill="x", expand=True, padx=(8, 8))
+
+        options_row = ttk.Frame(step3_body, style="Surface.TFrame")
+        options_row.pack(fill="x", pady=(0, 8))
+        self._checkbox(options_row, self._text("encrypt_mapping"), self.encrypt_mapping).pack(side=LEFT, padx=(0, 12))
+        self._checkbox(options_row, self._text("remove_headers_footers"), self.remove_headers_footers).pack(side=LEFT)
+
+        action_row = ttk.Frame(step3_body, style="Surface.TFrame")
+        action_row.pack(fill="x")
+        self.anonymize_action_button = self._primary_button(action_row, text="\u2714 开始脱敏", command=self.start_anonymize)
+        self.page_action_button = self.anonymize_action_button
+        self.anonymize_action_button.pack(side=RIGHT)
 
         if not self._enterprise_terms_loaded:
             self._load_enterprise_terms_as_candidates(silent=True)
@@ -1924,48 +2183,48 @@ class DesensitizerApp:
         restore_content.pack(fill=BOTH, expand=True)
 
         restore_toolbar = ttk.Frame(restore_content, style="Workspace.TFrame")
-        restore_toolbar.pack(fill="x", pady=(0, 10))
-        self.restore_action_button = self._primary_button(restore_toolbar, text=self._text("start_restore"), command=self.start_restore)
+        restore_toolbar.pack(fill="x", pady=(0, 8))
+        self.restore_action_button = self._primary_button(restore_toolbar, text="\u2714 " + self._text("start_restore"), command=self.start_restore)
         self.restore_action_button.pack(side=RIGHT)
 
         guide_card, guide_frame = self._card(restore_content, self._text("tab_restore"))
-        guide_card.pack(fill="x", padx=0, pady=(0, 14))
+        guide_card.pack(fill="x", padx=0, pady=(0, 10))
         guide_text = (
-            "1. Add files to restore  2. Choose the mapping file  3. Confirm the output folder"
+            "1. Add files  2. Choose mapping  3. Confirm output and restore"
             if self.language == "en"
-            else "1. 添加待还原文件  2. 选择映射表  3. 确认输出目录后开始还原"
+            else "1. 添加文件  2. 选择映射表  3. 确认输出目录后还原"
         )
-        ttk.Label(guide_frame, text=guide_text, style="SurfaceMuted.TLabel", wraplength=980, justify=LEFT).pack(fill="x", anchor="w")
+        ttk.Label(guide_frame, text=guide_text, style="SurfaceMuted.TLabel", wraplength=700, justify=LEFT).pack(fill="x", anchor="w")
 
         file_card, file_frame = self._card(restore_content, self._text("restore_files"))
-        file_card.pack(fill="x", expand=False, padx=0, pady=(0, 14))
+        file_card.pack(fill="x", expand=False, padx=0, pady=(0, 10))
 
         button_row = ttk.Frame(file_frame, style="Surface.TFrame")
-        button_row.pack(fill="x", pady=(0, 10))
+        button_row.pack(fill="x", pady=(0, 8))
         ttk.Label(button_row, textvariable=self.restore_file_count_var, style="SurfaceMuted.TLabel").pack(side=LEFT)
-        self._danger_button(button_row, text=self._text("clear"), command=self.clear_restore_files).pack(side=RIGHT)
-        self._secondary_button(button_row, text=self._text("remove_selected"), command=self.remove_selected_restore_files).pack(side=RIGHT, padx=(0, 8))
-        self._secondary_button(button_row, text=self._text("add_file"), command=self.add_restore_files).pack(side=RIGHT, padx=(0, 8))
+        self._danger_button(button_row, text="\U0001f9f9 " + self._text("clear"), command=self.clear_restore_files).pack(side=RIGHT)
+        self._secondary_button(button_row, text="\U0001f5d1 " + self._text("remove_selected"), command=self.remove_selected_restore_files).pack(side=RIGHT, padx=(0, 6))
+        self._secondary_button(button_row, text="\u2795 " + self._text("add_file"), command=self.add_restore_files).pack(side=RIGHT, padx=(0, 6))
 
         restore_table = ttk.Frame(file_frame, style="Surface.TFrame")
         restore_table.pack(fill="x", expand=False)
-        self.restore_file_list = ttk.Treeview(restore_table, columns=("path",), show="headings", height=5)
+        self.restore_file_list = ttk.Treeview(restore_table, columns=("path",), show="headings", height=4)
         self.restore_file_list.heading("path", text=self._text("file_path"))
-        self.restore_file_list.column("path", width=1040, anchor="w")
+        self.restore_file_list.column("path", width=700, anchor="w")
         restore_yscroll = ttk.Scrollbar(restore_table, orient="vertical", command=self.restore_file_list.yview)
         self.restore_file_list.configure(yscrollcommand=restore_yscroll.set)
         self.restore_file_list.pack(side=LEFT, fill="x", expand=True)
         restore_yscroll.pack(side=RIGHT, fill="y")
 
         mapping_card, mapping_frame = self._card(restore_content, self._text("mapping_json"))
-        mapping_card.pack(fill="x", padx=0, pady=(0, 14))
-        self._secondary_button(mapping_frame, text=self._text("choose"), command=self.choose_mapping_file).pack(side=RIGHT)
-        ttk.Entry(mapping_frame, textvariable=self.mapping_path).pack(side=LEFT, fill="x", expand=True, padx=(0, 12))
+        mapping_card.pack(fill="x", padx=0, pady=(0, 10))
+        self._secondary_button(mapping_frame, text="\U0001f4c2 " + self._text("choose"), command=self.choose_mapping_file).pack(side=RIGHT)
+        ttk.Entry(mapping_frame, textvariable=self.mapping_path).pack(side=LEFT, fill="x", expand=True, padx=(0, 8))
 
         output_card, output_frame = self._card(restore_content, self._text("output_dir"))
         output_card.pack(fill="x", padx=0, pady=(0, 14))
-        self._secondary_button(output_frame, text=self._text("choose"), command=self.choose_restore_output_dir).pack(side=RIGHT)
-        ttk.Entry(output_frame, textvariable=self.restore_output_dir).pack(side=LEFT, fill="x", expand=True, padx=(0, 12))
+        self._secondary_button(output_frame, text="\U0001f4c2 " + self._text("choose"), command=self.choose_restore_output_dir).pack(side=RIGHT)
+        ttk.Entry(output_frame, textvariable=self.restore_output_dir).pack(side=LEFT, fill="x", expand=True, padx=(0, 8))
 
     def add_files(self) -> None:
         paths = filedialog.askopenfilenames(
@@ -2675,7 +2934,6 @@ class DesensitizerApp:
         dialog.title(self._text("add_manual"))
         dialog.transient(self.root)
         dialog.resizable(False, False)
-        self._center_child_window(dialog, 520, 230)
         container = ttk.Frame(dialog, style="Surface.TFrame", padding=(18, 16, 18, 16))
         container.pack(fill=BOTH, expand=True)
 
@@ -2709,6 +2967,7 @@ class DesensitizerApp:
         self._secondary_button(button_row, self._text("generate_placeholder"), generate_placeholder).pack(side=LEFT, padx=(0, 8))
         self._secondary_button(button_row, self._text("close"), dialog.destroy).pack(side=LEFT, padx=(0, 8))
         self._secondary_button(button_row, self._text("add_manual"), save).pack(side=LEFT)
+        self._fit_child_window(dialog, 560, 300)
         dialog.grab_set()
         dialog.focus_set()
 

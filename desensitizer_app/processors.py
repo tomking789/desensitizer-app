@@ -7,6 +7,8 @@ from collections import Counter
 from pathlib import Path
 from typing import Iterable
 
+from .core import ZWSP_MARKER, _prefix_conflict_codes
+
 import fitz
 import pdfplumber
 from docx import Document
@@ -1160,13 +1162,20 @@ def _apply_scoped_replacements_text(
 ) -> tuple[str, Counter[str]]:
     counts: Counter[str] = Counter()
     new_text = text
-    for replacement in sorted(replacements, key=lambda item: len(item.value), reverse=True):
+    replacement_list = list(replacements)
+    codes = {r.replacement for r in replacement_list if r.value and r.value != r.replacement}
+    conflicted = _prefix_conflict_codes(codes)
+    for replacement in sorted(replacement_list, key=lambda item: len(item.value), reverse=True):
         if not replacement.value or replacement.value == replacement.replacement:
             continue
         found = new_text.count(replacement.value)
         if not found:
             continue
-        new_text = new_text.replace(replacement.value, replacement.replacement)
+        code = replacement.replacement
+        if code in conflicted:
+            new_text = new_text.replace(replacement.value, code + ZWSP_MARKER)
+        else:
+            new_text = new_text.replace(replacement.value, code)
         counts[replacement.entity] += found
     return new_text, counts
 
