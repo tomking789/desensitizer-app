@@ -27,6 +27,7 @@ class TelemetrySettings:
     installation_id: str
     enabled: bool = True
     notice_seen: bool = False
+    registered: bool = False
 
 
 class AnonymousTelemetry:
@@ -141,20 +142,15 @@ class AnonymousTelemetry:
                 machine_marker = str(data.get("machine_marker") or "")
                 if int(data.get("settings_schema_version") or 0) >= SETTINGS_SCHEMA_VERSION and machine_marker == _current_machine_marker():
                     installation_id = str(data.get("installation_id") or "").strip() or str(uuid.uuid4())
-                    return TelemetrySettings(
-                        installation_id=installation_id,
-                        enabled=bool(data.get("telemetry_enabled", True)),
-                        notice_seen=bool(data.get("telemetry_notice_seen", False)),
-                    )
-                settings = TelemetrySettings(
-                    installation_id=str(uuid.uuid4()),
+                return TelemetrySettings(
+                    installation_id=installation_id,
                     enabled=bool(data.get("telemetry_enabled", True)),
                     notice_seen=bool(data.get("telemetry_notice_seen", False)),
+                    registered=bool(data.get("telemetry_registered", False)),
                 )
-                self._write_settings(settings)
-                return settings
             except Exception:
                 pass
+        settings = TelemetrySettings(installation_id=str(uuid.uuid4()))
         settings = TelemetrySettings(installation_id=str(uuid.uuid4()))
         self._write_settings(settings)
         return settings
@@ -170,6 +166,7 @@ class AnonymousTelemetry:
             "machine_marker": _current_machine_marker(),
             "telemetry_enabled": settings.enabled,
             "telemetry_notice_seen": settings.notice_seen,
+            "telemetry_registered": settings.registered,
         }
         self.settings_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 

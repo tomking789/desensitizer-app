@@ -1,13 +1,15 @@
 """
-静默更新检查模块 - 软件启动时自动向云端报告使用量并检查更新
+静默更新检查模块 - 软件启动时自动记录使用量并检查更新
 
-无弹窗、无授权、用户无感知。
+每次启动自动写入本地日志（%APPDATA%），同时尝试向云端上报。
+本地日志供统计查看器读取，无需服务端即可查看累计数据。
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+import os
 import platform
 import threading
 import urllib.request
@@ -17,9 +19,28 @@ from pathlib import Path
 from typing import Callable
 
 
+_USAGE_DIR = Path(os.environ.get("APPDATA", Path.home())) / "DesensitizerTool"
+_USAGE_FILE = _USAGE_DIR / "usage.jsonl"
+
+
 def _machine_id() -> str:
     raw = f"{platform.system()}|{platform.node()}|{uuid.getnode()}"
     return hashlib.sha256(raw.encode("utf-8", errors="ignore")).hexdigest()[:16]
+
+
+def _log_locally(app_version: str) -> None:
+    _USAGE_DIR.mkdir(parents=True, exist_ok=True)
+    record = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "version": app_version,
+        "machine_id": _machine_id(),
+        "event": "check_update",
+    }
+    try:
+        with open(_USAGE_FILE, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
 
 
 def check_for_update(
@@ -37,6 +58,8 @@ def check_for_update(
         on_update_available: 发现新版本时的回调函数，参数为 (当前版本, 最新版本)
         timeout: 请求超时秒数
     """
+    _log_locally(app_version)
+
     if not endpoint:
         return
 
@@ -51,7 +74,7 @@ def check_for_update(
                     if latest and latest != app_version:
                         on_update_available(app_version, latest)
         except Exception:
-            pass  # 静默失败，不影响用户使用
+            pass
 
     thread = threading.Thread(target=_do_check, daemon=True)
     thread.start()

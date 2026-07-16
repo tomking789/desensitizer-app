@@ -9,6 +9,17 @@ for telemetry_config in ('telemetry.json', 'telemetry.local.json', 'telemetry.ex
     if Path(telemetry_config).exists():
         datas.append((telemetry_config, '.'))
 
+# Include additional folders that are needed at runtime
+for folder_name in ('demo', 'enterprise', 'marketing', 'templates'):
+    folder_path = Path(folder_name)
+    if folder_path.exists():
+        datas.append((str(folder_path), folder_name))
+
+# Include 输出文件 folder if it exists
+output_folder = Path('输出文件')
+if output_folder.exists():
+    datas.append((str(output_folder), '输出文件'))
+
 python_root = Path(sys.base_prefix)
 for source, target in (
     (python_root / 'Lib' / 'tkinter', 'tkinter'),

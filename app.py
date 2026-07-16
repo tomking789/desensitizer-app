@@ -6,6 +6,7 @@ import os
 import queue
 import sys
 import threading
+import urllib.request
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
@@ -77,9 +78,23 @@ def _enable_dpi_awareness() -> None:
         import ctypes
 
         try:
-            ctypes.windll.shcore.SetProcessDpiAwareness(1)
+            # Try Per-Monitor V2 DPI awareness (Windows 10 1703+)
+            # DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = -4
+            ctypes.windll.user32.SetProcessDpiAwarenessContext(-4)
         except Exception:
-            ctypes.windll.user32.SetProcessDPIAware()
+            try:
+                # Fallback to Per-Monitor DPI awareness (Windows 8.1+)
+                # PROCESS_PER_MONITOR_DPI_AWARE = 2
+                ctypes.windll.shcore.SetProcessDpiAwareness(2)
+            except Exception:
+                try:
+                    # Fallback to System DPI awareness
+                    ctypes.windll.shcore.SetProcessDpiAwareness(1)
+                except Exception:
+                    try:
+                        ctypes.windll.user32.SetProcessDPIAware()
+                    except Exception:
+                        pass
     except Exception:
         pass
 
@@ -338,12 +353,13 @@ class DesensitizerApp:
 
     def _set_initial_window_geometry(self) -> None:
         left, top, work_width, work_height = self._get_work_area()
-        width = min(max(1000, work_width - 100), work_width)
-        height = min(max(650, work_height - 80), work_height)
+        # Use more conservative sizing to avoid layout issues on high DPI
+        width = min(max(960, int(work_width * 0.7)), work_width - 50)
+        height = min(max(680, int(work_height * 0.78)), work_height - 40)
         x = left + max(0, (work_width - width) // 2)
         y = top + max(0, (work_height - height) // 2)
         self.root.geometry(f"{width}x{height}+{x}+{y}")
-        self.root.minsize(850, 550)
+        self.root.minsize(800, 580)
 
     def _get_work_area(self) -> tuple[int, int, int, int]:
         try:
@@ -873,7 +889,10 @@ class DesensitizerApp:
     def _configure_fonts(self) -> None:
         try:
             current_scaling = float(self.root.tk.call("tk", "scaling"))
-            self.root.tk.call("tk", "scaling", max(current_scaling, 1.18))
+            # On Windows 11 with high DPI, ensure minimum scaling
+            # Don't force a higher scaling as it may cause layout issues
+            if current_scaling < 1.0:
+                self.root.tk.call("tk", "scaling", 1.0)
         except Exception:
             pass
         families = set(tkfont.families(self.root))
@@ -938,12 +957,6 @@ class DesensitizerApp:
             command=lambda: self._set_language("en"),
         )
         settings_menu.add_cascade(label=self._text("language"), menu=language_menu)
-        if self.telemetry.has_endpoint():
-            settings_menu.add_checkbutton(
-                label=self._text("anonymous_telemetry"),
-                variable=self.telemetry_enabled_var,
-                command=self._set_telemetry_enabled_from_menu,
-            )
         self.menu_bar.add_cascade(label=self._text("settings"), menu=settings_menu)
         self.menu_bar.add_command(label=self._text("upgrade_enterprise"), command=self._show_enterprise_upgrade)
         self.menu_bar.add_command(label=self._text("history"), command=self._show_history_dialog)
@@ -967,24 +980,32 @@ class DesensitizerApp:
         messagebox.showinfo(self._text("language_title"), self._text("language_message"))
 
     def _initialize_telemetry(self) -> None:
+        self._register_installation()
         self._check_for_update()
-        if not self.telemetry.has_endpoint():
+        self.telemetry.mark_notice_seen()
+
+    def _register_installation(self) -> None:
+        flag_dir = Path(os.environ.get("APPDATA", Path.home())) / "DesensitizerTool"
+        flag_file = flag_dir / "registered.flag"
+        if flag_file.exists():
             return
-        if not self.telemetry.notice_seen():
-            keep_enabled = messagebox.askyesno(
-                self._text("telemetry_notice_title"),
-                self._text("telemetry_notice_message"),
-                parent=self.root,
-            )
-            self.telemetry.set_enabled(keep_enabled)
-            self.telemetry.mark_notice_seen()
-            self.telemetry_enabled_var.set(keep_enabled)
-            self._refresh_menu()
-        self._track_usage("app_start")
+        endpoint = self.telemetry.endpoint
+        if not endpoint:
+            return
+        try:
+            installation_id = self.telemetry.settings.installation_id
+            url = f"{endpoint.rstrip('/')}/register?id={installation_id}"
+            with urllib.request.urlopen(url, timeout=5):
+                flag_dir.mkdir(parents=True, exist_ok=True)
+                flag_file.write_text(datetime.now().isoformat(), encoding="utf-8")
+        except Exception:
+            pass
 
     def _check_for_update(self) -> None:
         try:
             cfg_path = APP_HOME / "telemetry.json"
+            if not cfg_path.exists() and getattr(sys, "frozen", False):
+                cfg_path = Path(sys._MEIPASS) / "telemetry.json"
             if cfg_path.exists():
                 cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
                 url = cfg.get("update_check_url", "")
@@ -1137,7 +1158,7 @@ class DesensitizerApp:
         self._style.configure("SectionTitle.TLabel", background=palette["surface"], foreground=palette["fg"], font=(font_family, 10, "bold"))
         self._style.configure("Muted.TLabel", background=palette["bg"], foreground=palette["muted"])
         self._style.configure("SurfaceMuted.TLabel", background=palette["surface"], foreground=palette["muted"])
-        self._style.configure("Status.TLabel", background=palette["surface"], foreground=palette["muted"], padding=(14, 6))
+        self._style.configure("Status.TLabel", background=palette["surface"], foreground=palette["muted"], padding=(14, 8))
         self._style.configure("StatusAccent.TLabel", background=palette["surface"], foreground=palette["accent"], padding=(14, 6), font=(font_family, 9))
         self._style.configure("StatusSuccess.TLabel", background=palette["surface"], foreground=palette["success"], padding=(14, 6), font=(font_family, 9))
         self._style.configure("StatusDanger.TLabel", background=palette["surface"], foreground=palette["danger"], padding=(14, 6), font=(font_family, 9))
@@ -1522,46 +1543,48 @@ class DesensitizerApp:
         shell = ttk.Frame(self.root, style="App.TFrame")
         shell.pack(fill=BOTH, expand=True)
 
-        sidebar = ttk.Frame(shell, style="Sidebar.TFrame", width=150)
+        sidebar = ttk.Frame(shell, style="Sidebar.TFrame", width=120)
         sidebar.pack(side=LEFT, fill="y")
         sidebar.pack_propagate(False)
 
         brand = ttk.Frame(sidebar, style="Sidebar.TFrame")
-        brand.pack(fill="x", padx=10, pady=(10, 0))
-        ttk.Label(brand, text=self.enterprise_profile.product_name or self._text("app_title"), style="SidebarTitle.TLabel", wraplength=130).pack(anchor="w")
+        brand.pack(fill="x", padx=8, pady=(10, 0))
+        ttk.Label(brand, text=self.enterprise_profile.product_name or self._text("app_title"), style="SidebarTitle.TLabel", wraplength=104).pack(anchor="w")
         ttk.Label(brand, text=self._edition_label(), style="SidebarMuted.TLabel").pack(anchor="w", pady=(2, 0))
 
         # Brand / nav separator
         palette = getattr(self, "_palette", {"sidebar_border": "#283347"})
         sep = Canvas(sidebar, height=1, borderwidth=0, highlightthickness=0, background=palette["sidebar_border"])
-        sep.pack(fill="x", padx=10, pady=(8, 6))
+        sep.pack(fill="x", padx=8, pady=(8, 6))
 
         nav = ttk.Frame(sidebar, style="Sidebar.TFrame")
-        nav.pack(fill="x", padx=6, pady=(0, 6))
+        nav.pack(fill="x", padx=4, pady=(0, 6))
         self._segmented_button(nav, "anonymize", "\U0001f512  " + self._text("tab_anonymize")).pack(fill="x", pady=(0, 2))
         self._segmented_button(nav, "restore", "\U0001f504  " + self._text("tab_restore")).pack(fill="x")
 
         # Version at sidebar bottom
         version_frame = ttk.Frame(sidebar, style="Sidebar.TFrame")
-        version_frame.pack(side="bottom", fill="x", padx=10, pady=(0, 8))
+        version_frame.pack(side="bottom", fill="x", padx=8, pady=(0, 8))
         ttk.Label(version_frame, text=f"v{__version__}", style="SidebarVersion.TLabel").pack(anchor="w")
 
         workspace = ttk.Frame(shell, style="Workspace.TFrame")
         workspace.pack(side=LEFT, fill=BOTH, expand=True)
 
+        workspace.grid_rowconfigure(1, weight=1)
+        workspace.grid_columnconfigure(0, weight=1)
+
         topbar = ttk.Frame(workspace, style="Workspace.TFrame")
-        topbar.pack(fill="x", padx=16, pady=(10, 6))
+        topbar.grid(row=0, column=0, sticky="ew", padx=16, pady=(10, 6))
         ttk.Label(topbar, textvariable=self.page_title_var, style="PageTitle.TLabel").pack(side=LEFT)
 
         content_host = ttk.Frame(workspace, style="Workspace.TFrame")
-        content_host.pack(fill=BOTH, expand=True, padx=16, pady=(0, 8))
+        content_host.grid(row=1, column=0, sticky="nsew", padx=16, pady=(0, 4))
         self.anonymize_tab, self.anonymize_frame = self._create_scrollable_tab(content_host)
         self.restore_tab, self.restore_frame = self._create_scrollable_tab(content_host)
 
-        # Bottom status bar
         statusbar = ttk.Frame(workspace, style="Statusbar.TFrame", height=28)
-        statusbar.pack(fill="x", side="bottom", padx=0, pady=(0, 0))
-        statusbar.pack_propagate(False)
+        statusbar.grid(row=2, column=0, sticky="ew", padx=0, pady=(0, 2))
+        statusbar.grid_propagate(False)
         self.statusbar_label = ttk.Label(statusbar, textvariable=self.status_var, style="Status.TLabel")
         self.statusbar_label.pack(side=LEFT, padx=(10, 0))
 

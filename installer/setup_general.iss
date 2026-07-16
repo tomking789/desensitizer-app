@@ -1,6 +1,6 @@
-; Inno Setup 脚本 - 本地资料脱敏工具 v0.7.5 通用版安装包
+; Inno Setup 脚本 - 本地资料脱敏工具 v0.7.6 通用版安装包
 #define MyAppName "本地资料脱敏工具"
-#define MyAppVersion "0.7.5"
+#define MyAppVersion "0.7.6"
 #define MyAppPublisher "艺林万象（北京）科技有限公司"
 #define MyAppURL ""
 #define MyAppExeName "本地资料脱敏工具.exe"
@@ -14,7 +14,7 @@ DefaultDirName={autopf}\{#MyAppName}
 DisableProgramGroupPage=yes
 PrivilegesRequiredOverridesAllowed=dialog
 OutputDir=..\dist
-OutputBaseFilename=本地资料脱敏工具-v0.7.5-安装包
+OutputBaseFilename=本地资料脱敏工具-v0.7.6-安装包
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
