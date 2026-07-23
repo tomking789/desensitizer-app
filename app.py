@@ -994,7 +994,7 @@ class DesensitizerApp:
             return
         try:
             installation_id = self.telemetry.settings.installation_id
-            url = f"{endpoint.rstrip('/')}/register?id={installation_id}"
+            url = f"{endpoint.rstrip('/')}/register?id={installation_id}&version={__version__}"
             with urllib.request.urlopen(url, timeout=5):
                 flag_dir.mkdir(parents=True, exist_ok=True)
                 flag_file.write_text(datetime.now().isoformat(), encoding="utf-8")
@@ -1513,8 +1513,7 @@ class DesensitizerApp:
                 f"Version: {__version__}\n"
                 f"Edition: {self._edition_label()}\n"
                 f"{enterprise_lines}"
-                f"Publisher: {COMPANY_NAME_EN}\n\n"
-                f"License: {LICENSE_NAME}\n"
+                f"\nLicense: {LICENSE_NAME}\n"
                 "This tool processes supported files locally by default."
             )
         else:
@@ -1523,8 +1522,7 @@ class DesensitizerApp:
                 f"版本：{__version__}\n"
                 f"版本类型：{self._edition_label()}\n"
                 f"{enterprise_lines}"
-                f"出品方：{COMPANY_NAME}\n\n"
-                f"许可证：{LICENSE_NAME}\n"
+                f"\n许可证：{LICENSE_NAME}\n"
                 "本工具默认在本地处理支持的文件。"
             )
         messagebox.showinfo(self._text("about_title"), message)

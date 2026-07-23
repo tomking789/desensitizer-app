@@ -10,7 +10,6 @@ from typing import Iterable
 from .core import ZWSP_MARKER, _prefix_conflict_codes
 
 import fitz
-import pdfplumber
 from docx import Document
 from openpyxl import load_workbook
 from pptx import Presentation
@@ -1207,9 +1206,9 @@ def _extract_text_chunks(input_path: Path) -> list[str]:
 
 def _extract_pdf_text_chunks(input_path: Path) -> list[str]:
     pages: list[str] = []
-    with pdfplumber.open(input_path) as pdf:
-        for page in pdf.pages:
-            text = page.extract_text() or ""
+    with fitz.open(str(input_path)) as doc:
+        for page in doc:
+            text = page.get_text() or ""
             if text.strip():
                 pages.append(text)
     if not pages:
